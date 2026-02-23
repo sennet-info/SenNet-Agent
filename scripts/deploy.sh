@@ -19,7 +19,7 @@ fi
 
 echo "==> Ensure venv"
 if [ ! -d "$VENV" ]; then
-  python3.11 -m venv "$VENV"
+  python3 -m venv "$VENV"
 fi
 
 echo "==> Install dependencies"
