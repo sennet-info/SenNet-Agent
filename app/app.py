@@ -14,8 +14,15 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
 
     /* Configuración General */
+    :root {
+        --app-bg-green: #00AA00;
+    }
+
+    html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] > .main {
+        background-color: var(--app-bg-green) !important;
+    }
+
     .stApp {
-        background-color: #0F172A;
         font-family: 'Outfit', sans-serif;
         color: #F8FAFC;
     }
@@ -70,7 +77,7 @@ st.markdown("""
     }
 
     /* Sidebar */
-    section[data-testid="stSidebar"] { background-color: #0B1120; border-right: 1px solid #1E293B; }
+    section[data-testid="stSidebar"] { background-color: var(--app-bg-green) !important; border-right: 1px solid #1E293B; }
     .logo-text { font-size: 2rem; font-weight: 800; color: #EF4444; margin-bottom: 1.5rem; }
     .logo-sub { font-size: 0.85rem; color: #94A3B8; margin-top: -10px; }
 
