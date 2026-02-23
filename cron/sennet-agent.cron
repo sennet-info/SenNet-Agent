@@ -1,0 +1,1 @@
+* * * * * debian /opt/sennet-agent/venv/bin/python /opt/sennet-agent/repo/app/run_report_oneshot.py > /opt/sennet-agent/cron_log.log 2>&1
