@@ -1,0 +1,20 @@
+{
+    "profile_name": "Cliente Ejemplo",
+    "influx_config": {
+        "url": "https://us-east-1-1.aws.cloud2.influxdata.com",
+        "bucket": "ingest_logger_audit",
+        "org": "TU_ORG_AQUI",
+        "token": "TU_TOKEN_AQUI"
+    },
+    "devices": [
+        {
+            "serial": "DL200_TEST",
+            "alias": "Contador Principal",
+            "type": "energy"
+        }
+    ],
+    "report_settings": {
+        "logo_url": "https://tu-bucket-s3.../logo.png",
+        "primary_color": "#2E7D32"
+    }
+}

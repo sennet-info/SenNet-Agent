@@ -1,0 +1,8 @@
+{
+  "host": "smtp.tu-dominio.com",
+  "port": 587,
+  "user": "usuario@tu-dominio.com",
+  "password": "CAMBIAR",
+  "use_tls": true,
+  "from_email": "noreply@tu-dominio.com"
+}

@@ -1,0 +1,15 @@
+# Runtime configs (NO subir)
+app/config_tenants.json
+app/smtp_config.json
+app/scheduled_tasks.json
+app/device_roles.json
+
+# Generated / runtime
+app/output/
+*.log
+__pycache__/
+*.pyc
+
+# OS / editor
+.DS_Store
+Thumbs.db

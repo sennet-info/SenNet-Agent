@@ -1,0 +1,41 @@
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
+import os
+
+class EmailSender:
+    def __init__(self, smtp_server, smtp_port, username, password):
+        self.smtp_server = smtp_server
+        self.smtp_port = int(smtp_port)
+        self.username = username
+        self.password = password
+
+    def send_email(self, recipients, subject, body, attachment_path=None):
+        msg = MIMEMultipart()
+        msg['From'] = self.username
+        msg['To'] = ", ".join(recipients)
+        msg['Subject'] = subject
+
+        msg.attach(MIMEText(body, 'plain'))
+
+        if attachment_path and os.path.exists(attachment_path):
+            with open(attachment_path, "rb") as f:
+                part = MIMEApplication(f.read(), Name=os.path.basename(attachment_path))
+            part['Content-Disposition'] = f'attachment; filename="{os.path.basename(attachment_path)}"'
+            msg.attach(part)
+
+        try:
+            # Detectamos si es puerto SSL (465) o TLS (587)
+            if self.smtp_port == 465:
+                server = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port)
+            else:
+                server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+                server.starttls()
+
+            server.login(self.username, self.password)
+            server.send_message(msg)
+            server.quit()
+            return True, "Enviado correctamente"
+        except Exception as e:
+            return False, str(e)

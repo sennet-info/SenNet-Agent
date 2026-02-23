@@ -1,0 +1,11 @@
+{
+  "tenants": [
+    {
+      "client": "sennet",
+      "influx_url": "https://TU_INFLUX_URL",
+      "token": "TU_TOKEN",
+      "org": "TU_ORG",
+      "bucket": "TU_BUCKET"
+    }
+  ]
+}

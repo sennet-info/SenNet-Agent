@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  reporter:
+    build: .
+    container_name: sennet_reporter
+    volumes:
+      # Mapeamos la carpeta de perfiles para añadir clientes sin reconstruir
+      - ./profiles:/app/profiles
+      # Mapeamos la salida para recoger los PDFs generados
+      - ./output:/app/output
+      # (Opcional) Mapear el código si queremos desarrollo en caliente
+      # - ./modules:/app/modules
+      # - ./templates:/app/templates
+      # - ./main.py:/app/main.py
+    environment:
+      - INFLUX_TOKEN=${INFLUX_TOKEN}
+      - INFLUX_ORG=${INFLUX_ORG}
+    # Mantener el contenedor encendido para recibir comandos
+    command: tail -f /dev/null

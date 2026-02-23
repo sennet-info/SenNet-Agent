@@ -1,0 +1,24 @@
+{
+    "profile_name": "SenNet Cliente 1",
+    "influx_config": {
+        "url": "https://us-east-1-1.aws.cloud2.influxdata.com",
+        "bucket": "db_optimal",
+        "org": "0662a1334f1fb899",
+        "token": "b0O18EwK4L1N4wVN019l7FJ9VjvlQbbPJhIypHKc5HTkXEkQhdcys3qoxnmgTgGDeCydpoMxo43X6yjRKjD3Zg=="
+    },
+    "devices": [
+        {
+            "serial": "DL200sn23065100",
+            "type": "energy",
+            "alias": "General y Horno",
+            "filter_device": [
+                "General",
+                "General_produccion",
+                "Horno_PickandPlace"
+            ]
+        }
+    ],
+    "report_settings": {
+        "primary_color": "#D32F2F"
+    }
+}

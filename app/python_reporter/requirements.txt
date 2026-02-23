@@ -1,0 +1,6 @@
+influxdb-client
+pandas
+matplotlib
+seaborn
+jinja2
+weasyprint
