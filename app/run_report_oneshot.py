@@ -102,7 +102,9 @@ def main():
                     devices=devices,
                     range_flux=range_flux,
                     callback_status=None,
-                    debug_mode=False
+                    debug_mode=False,
+                    start_dt=start_dt,
+                    end_dt=end_dt,
                 )
 
                 if pdf_path and os.path.exists(pdf_path):
