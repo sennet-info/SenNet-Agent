@@ -8,9 +8,9 @@ REPORT_RANGE_OPTIONS = {
     "last_7_days": "Últimos 7 días",
     "last_15_days": "Últimos 15 días",
     "last_30_days": "Últimos 30 días",
-    "rolling_1_month": "Último mes (móvil)",
-    "month_to_date": "Mes actual (hasta hoy)",
-    "previous_full_month": "Mes anterior completo",
+    "rolling_1_month": "Último mes (móvil desde hoy)",
+    "month_to_date": "Mes actual (del 1 al día de hoy)",
+    "previous_full_month": "Mes anterior (mes completo)",
     "current_and_previous_full_month": "Mes anterior completo + mes actual (hasta hoy)",
 }
 
