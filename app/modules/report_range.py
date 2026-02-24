@@ -1,5 +1,6 @@
 import calendar
 from datetime import datetime, timedelta
+from typing import Optional, Tuple
 
 DEFAULT_REPORT_RANGE_MODE = "last_7_days"
 
@@ -31,7 +32,7 @@ def _shift_one_month_back(value: datetime) -> datetime:
     return value.replace(year=year, month=month, day=min(value.day, max_day))
 
 
-def compute_report_range(mode: str, now: datetime | None = None) -> tuple[datetime, datetime]:
+def compute_report_range(mode: str, now: Optional[datetime] = None) -> Tuple[datetime, datetime]:
     reference = _as_local_time(now or datetime.now().astimezone())
     safe_mode = mode or DEFAULT_REPORT_RANGE_MODE
 
