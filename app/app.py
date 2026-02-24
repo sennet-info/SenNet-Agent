@@ -99,6 +99,14 @@ def load_roles():
 def save_roles(data):
     with open('device_roles.json', 'w') as f: json.dump(data, f, indent=2)
 
+def log_scheduler_event(event, **kwargs):
+    log_file = "cron_log.log"
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    details = " ".join([f"{k}={v}" for k, v in kwargs.items()])
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"[{ts}] {event} {details}\n")
+
+
 with st.sidebar:
     st.markdown('<div class="logo-text">SenNet<span style="color:white">Intelligence</span></div>', unsafe_allow_html=True)
     st.markdown('<div class="logo-sub">Platform V52.0 (SCHEDULER)</div>', unsafe_allow_html=True)
@@ -204,6 +212,14 @@ if mode == "📅 Programador":
                             auth = tenants.get(t.get('tenant_alias'))
                             if auth:
                                 try:
+                                    claim = SchedulerLogic.claim_execution(t['id'], source="manual")
+                                    if not claim.get('ok'):
+                                        log_scheduler_event("TASK_EXECUTE_SKIP_ALREADY_RAN", task_id=t['id'], reason=claim.get('reason'))
+                                        st.warning("Tarea ya en ejecución o ya marcada en esta ventana.")
+                                        continue
+
+                                    run_id = claim.get('run_id')
+                                    log_scheduler_event("TASK_EXECUTE_START", task_id=t['id'], run_id=run_id)
                                     start_dt, end_dt = compute_report_range(task_range_mode)
                                     range_flux = to_flux_range(start_dt, end_dt)
                                     pdf = run_analysis_discovery(auth, t['client'], t['site'], [t['device']], range_flux, 0.14, None)
@@ -251,9 +267,19 @@ if mode == "📅 Programador":
                                     </html>
                                     """
                                     ok, msg = sender.send_email(t['emails'], subject, body, pdf)
-                                    if ok: st.success("🚀 ¡Informe Premium Enviado!"); SchedulerLogic.update_last_run(t['id']); time.sleep(1); st.rerun()
-                                    else: st.error(msg)
-                                except Exception as e: st.error(f"Error: {e}")
+                                    if ok:
+                                        log_scheduler_event("TASK_EMAIL_SENT", task_id=t['id'], run_id=run_id)
+                                        st.success("🚀 ¡Informe Premium Enviado!")
+                                    else:
+                                        st.error(msg)
+                                    SchedulerLogic.finish_execution(t['id'], run_id, sent_ok=ok)
+                                    if ok:
+                                        time.sleep(1)
+                                        st.rerun()
+                                except Exception as e:
+                                    if 'run_id' in locals() and run_id:
+                                        SchedulerLogic.finish_execution(t['id'], run_id, sent_ok=False)
+                                    st.error(f"Error: {e}")
                             else: st.error("Conexión perdida")
 
                     if c3.button("🗑️", key=f"del_task_{t['id']}"):
