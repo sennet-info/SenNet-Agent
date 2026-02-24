@@ -222,7 +222,7 @@ if mode == "📅 Programador":
                                     log_scheduler_event("TASK_EXECUTE_START", task_id=t['id'], run_id=run_id)
                                     start_dt, end_dt = compute_report_range(task_range_mode)
                                     range_flux = to_flux_range(start_dt, end_dt)
-                                    pdf = run_analysis_discovery(auth, t['client'], t['site'], [t['device']], range_flux, 0.14, None)
+                                    pdf = run_analysis_discovery(auth, t['client'], t['site'], [t['device']], range_flux, 0.14, None, start_dt=start_dt, end_dt=end_dt)
                                     from modules.email_sender import EmailSender
                                     smtp = {}
                                     if os.path.exists("smtp_config.json"):

@@ -1,6 +1,6 @@
 import calendar
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 DEFAULT_REPORT_RANGE_MODE = "last_7_days"
 
@@ -63,3 +63,30 @@ def to_flux_range(start_dt: datetime, end_dt: datetime) -> str:
     start_iso = _as_local_time(start_dt).isoformat(timespec="seconds")
     end_iso = _as_local_time(end_dt).isoformat(timespec="seconds")
     return f"start: time(v: \"{start_iso}\"), stop: time(v: \"{end_iso}\")"
+
+
+def split_range_by_month(start_dt: datetime, end_dt: datetime) -> List[Dict[str, datetime]]:
+    """Split a datetime range into contiguous month-bounded periods."""
+    start_local = _as_local_time(start_dt)
+    end_local = _as_local_time(end_dt)
+    if start_local >= end_local:
+        return []
+
+    periods: List[Dict[str, datetime]] = []
+    cursor = start_local
+
+    while cursor < end_local:
+        month_days = calendar.monthrange(cursor.year, cursor.month)[1]
+        month_end_exclusive = cursor.replace(
+            day=month_days,
+            hour=23,
+            minute=59,
+            second=59,
+            microsecond=999999,
+        ) + timedelta(microseconds=1)
+
+        period_end = min(month_end_exclusive, end_local)
+        periods.append({"start": cursor, "end": period_end})
+        cursor = period_end
+
+    return periods
