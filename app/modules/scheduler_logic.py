@@ -2,6 +2,7 @@ import json
 import os
 import uuid
 from datetime import datetime
+from modules.report_range import DEFAULT_REPORT_RANGE_MODE
 
 # RUTA DE DATOS CORREGIDA PARA CRON (Ruta absoluta dinamica)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -19,7 +20,7 @@ class SchedulerLogic:
         with open(TASKS_FILE, 'w') as f: json.dump(tasks, f, indent=2)
 
     @staticmethod
-    def add_task(tenant_alias, client, site, device, frequency, time, emails):
+    def add_task(tenant_alias, client, site, device, frequency, time, emails, report_range_mode=DEFAULT_REPORT_RANGE_MODE):
         tasks = SchedulerLogic.load_tasks()
         task = {
             "id": str(uuid.uuid4()),
@@ -30,6 +31,7 @@ class SchedulerLogic:
             "frequency": frequency, 
             "time": time, 
             "emails": emails,
+            "report_range_mode": report_range_mode or DEFAULT_REPORT_RANGE_MODE,
             "last_run": None,
             "created_at": datetime.now().isoformat()
         }
