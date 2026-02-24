@@ -79,6 +79,8 @@ def main():
             print(f"   🚀 Ejecutando: {task['client']} - {task['site']} ({task['frequency']})")
 
             sent_ok = False
+            start_dt = None
+            end_dt = None
             try:
                 tenant_alias = task.get('tenant_alias')
                 if not tenant_alias or tenant_alias not in tenants:
@@ -147,7 +149,7 @@ def main():
             except Exception as e:
                 print(f"      🔥 Excepción: {e}")
             finally:
-                SchedulerLogic.finish_execution(task['id'], run_id, sent_ok=sent_ok)
+                SchedulerLogic.finish_execution(task['id'], run_id, sent_ok=sent_ok, range_start=start_dt, range_end=end_dt)
 
         if tasks_executed == 0:
             print("   (Ninguna tarea coincidía con la hora actual)")

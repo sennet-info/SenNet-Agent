@@ -58,6 +58,8 @@ class SchedulerLogic:
             "last_run": None,
             "last_run_id": None,
             "last_run_ts": None,
+            "last_range_start": None,
+            "last_range_end": None,
             "last_manual_run": None,
             "last_manual_run_id": None,
             "in_progress_run_id": None,
@@ -151,8 +153,10 @@ class SchedulerLogic:
         return SchedulerLogic._with_tasks_lock(_claim)
 
     @staticmethod
-    def finish_execution(task_id, run_id, sent_ok):
+    def finish_execution(task_id, run_id, sent_ok, range_start=None, range_end=None):
         now_iso = datetime.now().isoformat(timespec="seconds")
+        range_start_iso = range_start.isoformat(timespec="seconds") if isinstance(range_start, datetime) else range_start
+        range_end_iso = range_end.isoformat(timespec="seconds") if isinstance(range_end, datetime) else range_end
 
         def _finish(tasks):
             for t in tasks:
@@ -162,6 +166,9 @@ class SchedulerLogic:
                     t['in_progress_run_id'] = None
                     t['in_progress_source'] = None
                     t['in_progress_started_at'] = None
+                if range_start_iso and range_end_iso:
+                    t['last_range_start'] = range_start_iso
+                    t['last_range_end'] = range_end_iso
                 t['last_email_sent_at'] = now_iso if sent_ok else t.get('last_email_sent_at')
                 return {"save": True, "ok": True}
             return {"save": False, "ok": False}

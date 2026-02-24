@@ -8,6 +8,33 @@ import time
 from main import run_analysis_discovery, get_discovery_options
 from modules.report_range import REPORT_RANGE_OPTIONS, DEFAULT_REPORT_RANGE_MODE, compute_report_range, to_flux_range
 
+FREQUENCY_DEFAULT_RANGE_MODE = {
+    "Diaria": "last_7_days",
+    "Semanal": "last_7_days",
+    "Mensual": "previous_full_month",
+}
+
+
+def format_date_es(value):
+    if not value:
+        return "--"
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    return value.strftime("%d/%m/%Y")
+
+
+def render_report_range_help(selected_mode):
+    start_dt, end_dt = compute_report_range(selected_mode, now=datetime.now())
+    st.caption(f"Rango calculado: {format_date_es(start_dt)} → {format_date_es(end_dt)}")
+    st.caption(
+        "• Mes anterior (mes completo): ideal para informes mensuales\n"
+        "• Último mes (móvil): ideal si quieres siempre 30-31 días desde hoy"
+    )
+
+
 st.set_page_config(page_title="SenNet Energy Intelligence", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
@@ -157,13 +184,22 @@ if mode == "📅 Programador":
                 st.subheader("2. Programación y Envío")
                 p_freq = st.selectbox("Frecuencia", ["Diaria", "Semanal", "Mensual"], key="sch_f")
                 report_range_modes = list(REPORT_RANGE_OPTIONS.keys())
+                suggested_mode = FREQUENCY_DEFAULT_RANGE_MODE.get(p_freq, DEFAULT_REPORT_RANGE_MODE)
+                if st.session_state.get("sch_rrm_last_freq") != p_freq:
+                    st.session_state["sch_rrm"] = suggested_mode
+                    st.session_state["sch_rrm_last_freq"] = p_freq
+
+                current_mode = st.session_state.get("sch_rrm", DEFAULT_REPORT_RANGE_MODE)
+                if current_mode not in report_range_modes:
+                    current_mode = DEFAULT_REPORT_RANGE_MODE
                 p_report_range_mode = st.selectbox(
                     "Rango del informe",
                     report_range_modes,
-                    index=report_range_modes.index(DEFAULT_REPORT_RANGE_MODE),
+                    index=report_range_modes.index(current_mode),
                     format_func=lambda mode: REPORT_RANGE_OPTIONS[mode],
                     key="sch_rrm"
                 )
+                render_report_range_help(p_report_range_mode)
                 p_time = st.time_input("Hora de Ejecución", value=datetime.strptime("08:00", "%H:%M").time(), key="sch_t")
                 p_emails = st.text_area("Emails Destino (separados por coma)", placeholder="jefe@empresa.com, yo@empresa.com", key="sch_e")
                 
@@ -204,13 +240,27 @@ if mode == "📅 Programador":
                     c1, c2, c3 = st.columns([3, 1, 1])
                     task_range_mode = t.get('report_range_mode', DEFAULT_REPORT_RANGE_MODE)
                     task_range_label = REPORT_RANGE_OPTIONS.get(task_range_mode, REPORT_RANGE_OPTIONS[DEFAULT_REPORT_RANGE_MODE])
-                    c1.markdown(f"**Conexión:** {t.get('tenant_alias','--')}<br>**Cliente:** {t['client']}<br>**Emails:** {', '.join(t['emails'])}<br>**Rango informe:** {task_range_label}<br>**Última:** {t['last_run'] if t['last_run'] else 'Nunca'}", unsafe_allow_html=True)
+                    last_range_text = ""
+                    if t.get('last_range_start') and t.get('last_range_end'):
+                        last_range_text = f"<br><small>Último rango ejecutado: {format_date_es(t.get('last_range_start'))} → {format_date_es(t.get('last_range_end'))}</small>"
+
+                    c1.markdown(
+                        f"**Conexión:** {t.get('tenant_alias','--')}<br>"
+                        f"**Cliente:** {t['client']}<br>"
+                        f"**Emails:** {', '.join(t['emails'])}<br>"
+                        f"**Rango informe:** {task_range_label}<br>"
+                        f"**Última:** {t['last_run'] if t['last_run'] else 'Nunca'}"
+                        f"{last_range_text}",
+                        unsafe_allow_html=True
+                    )
                     
                     if c2.button("🚀 Ahora", key=f"run_now_{t['id']}"):
                         with st.spinner("Enviando..."):
                             # Ejecución puntual
                             auth = tenants.get(t.get('tenant_alias'))
                             if auth:
+                                start_dt = None
+                                end_dt = None
                                 try:
                                     claim = SchedulerLogic.claim_execution(t['id'], source="manual")
                                     if not claim.get('ok'):
@@ -272,13 +322,13 @@ if mode == "📅 Programador":
                                         st.success("🚀 ¡Informe Premium Enviado!")
                                     else:
                                         st.error(msg)
-                                    SchedulerLogic.finish_execution(t['id'], run_id, sent_ok=ok)
+                                    SchedulerLogic.finish_execution(t['id'], run_id, sent_ok=ok, range_start=start_dt, range_end=end_dt)
                                     if ok:
                                         time.sleep(1)
                                         st.rerun()
                                 except Exception as e:
                                     if 'run_id' in locals() and run_id:
-                                        SchedulerLogic.finish_execution(t['id'], run_id, sent_ok=False)
+                                        SchedulerLogic.finish_execution(t['id'], run_id, sent_ok=False, range_start=start_dt, range_end=end_dt)
                                     st.error(f"Error: {e}")
                             else: st.error("Conexión perdida")
 
