@@ -6,6 +6,7 @@ from datetime import datetime
 from modules.db_connector import DataFetcher
 from modules.analyzer import Analyzer
 from modules.visualizer import Visualizer
+from modules.report_range import to_flux_range
 
 # Configuración PDF
 try:
@@ -23,8 +24,10 @@ def get_discovery_options(auth_config, level, parent=None, site=None, serial=Non
     elif level == "devices": return fetcher.get_devices(auth_config['bucket'], parent, site, serial=serial)
     return []
 
-def run_analysis_discovery(auth_config, client, site, devices, range_flux="7d", default_price=0.14, callback_status=None, serial=None, debug_mode=False):
+def run_analysis_discovery(auth_config, client, site, devices, range_flux="7d", default_price=0.14, callback_status=None, serial=None, debug_mode=False, start_dt=None, end_dt=None):
     fetcher = DataFetcher(auth_config['url'], auth_config['token'], auth_config['org'])
+    if start_dt and end_dt:
+        range_flux = to_flux_range(start_dt, end_dt)
     os.makedirs('output', exist_ok=True)
     
     # Estructura del Informe

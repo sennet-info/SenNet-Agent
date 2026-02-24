@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # Importamos nuestros modulos
 from modules.scheduler_logic import SchedulerLogic
 from modules.email_sender import EmailSender
+from modules.report_range import DEFAULT_REPORT_RANGE_MODE, compute_report_range, to_flux_range
 from main import run_analysis_discovery
 
 # RUTAS ABSOLUTAS CORREGIDAS PARA CRON
@@ -27,12 +28,6 @@ def load_smtp():
     if os.path.exists(SMTP_FILE):
         with open(SMTP_FILE, 'r') as f: return json.load(f)
     return {}
-
-def get_range_flux(frequency):
-    if frequency == 'daily': return "7d"
-    if frequency == 'weekly': return "30d"
-    if frequency == 'monthly': return "30d"
-    return "7d"
 
 def main():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔎 CRON: Buscando tareas...")
@@ -74,9 +69,14 @@ def main():
                     auth_config = tenants[tenant_alias]
                     
                     # 2. Configurar Ejecución
-                    range_flux = get_range_flux(task['frequency'])
+                    report_range_mode = task.get('report_range_mode', DEFAULT_REPORT_RANGE_MODE)
+                    start_dt, end_dt = compute_report_range(report_range_mode)
+                    range_flux = to_flux_range(start_dt, end_dt)
                     devices = [task['device']]
-                    
+                    print(
+                        f"      🧭 report_range_mode={report_range_mode} | start={start_dt.isoformat(timespec='seconds')} | end={end_dt.isoformat(timespec='seconds')}"
+                    )
+
                     # 3. GENERAR PDF
                     print("      📊 Generando Informe PDF...")
                     pdf_path = run_analysis_discovery(

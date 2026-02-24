@@ -6,6 +6,7 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 import time
 from main import run_analysis_discovery, get_discovery_options
+from modules.report_range import REPORT_RANGE_OPTIONS, DEFAULT_REPORT_RANGE_MODE, compute_report_range, to_flux_range
 
 st.set_page_config(page_title="SenNet Energy Intelligence", layout="wide", initial_sidebar_state="expanded")
 
@@ -147,6 +148,14 @@ if mode == "📅 Programador":
             with col2:
                 st.subheader("2. Programación y Envío")
                 p_freq = st.selectbox("Frecuencia", ["Diaria", "Semanal", "Mensual"], key="sch_f")
+                report_range_modes = list(REPORT_RANGE_OPTIONS.keys())
+                p_report_range_mode = st.selectbox(
+                    "Rango del informe",
+                    report_range_modes,
+                    index=report_range_modes.index(DEFAULT_REPORT_RANGE_MODE),
+                    format_func=lambda mode: REPORT_RANGE_OPTIONS[mode],
+                    key="sch_rrm"
+                )
                 p_time = st.time_input("Hora de Ejecución", value=datetime.strptime("08:00", "%H:%M").time(), key="sch_t")
                 p_emails = st.text_area("Emails Destino (separados por coma)", placeholder="jefe@empresa.com, yo@empresa.com", key="sch_e")
                 
@@ -167,7 +176,8 @@ if mode == "📅 Programador":
                             device=p_dev,
                             frequency=freq_map[p_freq],
                             time=p_time.strftime("%H:%M"),
-                            emails=emails_list
+                            emails=emails_list,
+                            report_range_mode=p_report_range_mode
                         )
                         st.success(f"✅ Tarea guardada correctamente. ID: {res['id'][:8]}...")
                         time.sleep(1)
@@ -184,7 +194,9 @@ if mode == "📅 Programador":
             for t in tasks:
                 with st.expander(f"⏰ {t['time']} | {t['site']} ({t['device']}) - {t['frequency'].upper()}"):
                     c1, c2, c3 = st.columns([3, 1, 1])
-                    c1.markdown(f"**Conexión:** {t.get('tenant_alias','--')}<br>**Cliente:** {t['client']}<br>**Emails:** {', '.join(t['emails'])}<br>**Última:** {t['last_run'] if t['last_run'] else 'Nunca'}", unsafe_allow_html=True)
+                    task_range_mode = t.get('report_range_mode', DEFAULT_REPORT_RANGE_MODE)
+                    task_range_label = REPORT_RANGE_OPTIONS.get(task_range_mode, REPORT_RANGE_OPTIONS[DEFAULT_REPORT_RANGE_MODE])
+                    c1.markdown(f"**Conexión:** {t.get('tenant_alias','--')}<br>**Cliente:** {t['client']}<br>**Emails:** {', '.join(t['emails'])}<br>**Rango informe:** {task_range_label}<br>**Última:** {t['last_run'] if t['last_run'] else 'Nunca'}", unsafe_allow_html=True)
                     
                     if c2.button("🚀 Ahora", key=f"run_now_{t['id']}"):
                         with st.spinner("Enviando..."):
@@ -192,7 +204,9 @@ if mode == "📅 Programador":
                             auth = tenants.get(t.get('tenant_alias'))
                             if auth:
                                 try:
-                                    pdf = run_analysis_discovery(auth, t['client'], t['site'], [t['device']], "7d", 0.14, None)
+                                    start_dt, end_dt = compute_report_range(task_range_mode)
+                                    range_flux = to_flux_range(start_dt, end_dt)
+                                    pdf = run_analysis_discovery(auth, t['client'], t['site'], [t['device']], range_flux, 0.14, None)
                                     from modules.email_sender import EmailSender
                                     smtp = {}
                                     if os.path.exists("smtp_config.json"):
