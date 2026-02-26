@@ -36,3 +36,9 @@ Repo uses symlinks in:
 
 ## Safety
 - Never log or commit secrets (tokens, SMTP passwords).
+
+## Portal Next.js
+- Runtime path: `/home/debian/sennet-portal`
+- Manual build: `cd /home/debian/sennet-portal && ./scripts/build_standalone.sh`
+- Service logs: `journalctl -u sennet-portal.service -n 200 --no-pager`
+- URL: `http://<ip>:3000`
