@@ -5,6 +5,8 @@ BASE="/opt/sennet-agent"
 REPO_DIR="$BASE/repo"
 VENV="$BASE/venv"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
+PORTAL_SOURCE_DIR="$REPO_DIR/portal"
+PORTAL_RUNTIME_DIR="/home/debian/sennet-portal"
 
 echo "==> Deploy branch: $DEPLOY_BRANCH"
 echo "==> Ensure base folders"
@@ -59,5 +61,30 @@ echo "==> Install cron"
 sudo cp "$REPO_DIR/cron/sennet-agent.cron" /etc/cron.d/sennet-agent
 sudo chmod 644 /etc/cron.d/sennet-agent
 
+if [ -d "$PORTAL_SOURCE_DIR" ]; then
+  echo "==> Portal detected in $PORTAL_SOURCE_DIR"
+  echo "==> Sync portal sources to $PORTAL_RUNTIME_DIR"
+  sudo -u debian mkdir -p "$PORTAL_RUNTIME_DIR"
+  rsync -a --delete \
+    --exclude node_modules \
+    --exclude .next \
+    --exclude .git \
+    "$PORTAL_SOURCE_DIR/" "$PORTAL_RUNTIME_DIR/"
+
+  echo "==> Build portal standalone bundle as debian user"
+  sudo -u debian -H bash -lc 'cd /home/debian/sennet-portal && ./scripts/build_standalone.sh'
+
+  echo "==> Install portal systemd service"
+  sudo cp "$REPO_DIR/systemd/sennet-portal.service" /etc/systemd/system/sennet-portal.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now sennet-portal.service
+  sudo systemctl restart sennet-portal.service
+else
+  echo "==> Portal directory not found; skipping portal deployment"
+fi
+
 echo "==> Done"
 systemctl --no-pager --full status sennet-agent.service || true
+if systemctl list-unit-files | grep -q '^sennet-portal.service'; then
+  systemctl --no-pager --full status sennet-portal.service || true
+fi
