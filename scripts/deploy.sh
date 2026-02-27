@@ -7,6 +7,7 @@ VENV="$BASE/venv"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 PORTAL_SOURCE_DIR="$REPO_DIR/portal"
 PORTAL_RUNTIME_DIR="/home/debian/sennet-portal"
+PORTAL_APP_DIR="$PORTAL_RUNTIME_DIR/portal"
 
 echo "==> Deploy branch: $DEPLOY_BRANCH"
 echo "==> Ensure base folders"
@@ -63,16 +64,24 @@ sudo chmod 644 /etc/cron.d/sennet-agent
 
 if [ -d "$PORTAL_SOURCE_DIR" ]; then
   echo "==> Portal detected in $PORTAL_SOURCE_DIR"
-  echo "==> Sync portal sources to $PORTAL_RUNTIME_DIR"
-  sudo -u debian mkdir -p "$PORTAL_RUNTIME_DIR"
-  rsync -a --delete \
+  echo "==> Sync portal sources to $PORTAL_APP_DIR"
+  sudo mkdir -p "$PORTAL_APP_DIR"
+
+  RSYNC_CHOWN_ARGS=()
+  if rsync --help 2>&1 | grep -q -- '--chown'; then
+    RSYNC_CHOWN_ARGS+=(--chown=debian:debian)
+  fi
+
+  sudo rsync -a --delete "${RSYNC_CHOWN_ARGS[@]}" \
     --exclude node_modules \
     --exclude .next \
     --exclude .git \
-    "$PORTAL_SOURCE_DIR/" "$PORTAL_RUNTIME_DIR/"
+    "$PORTAL_SOURCE_DIR/" "$PORTAL_APP_DIR/"
+
+  sudo chown -R debian:debian "$PORTAL_RUNTIME_DIR"
 
   echo "==> Build portal standalone bundle as debian user"
-  sudo -u debian -H bash -lc 'cd /home/debian/sennet-portal && ./scripts/build_standalone.sh'
+  sudo -u debian -H bash -lc 'cd /home/debian/sennet-portal && cd portal && ./scripts/build_standalone.sh'
 
   echo "==> Install portal systemd service"
   sudo cp "$REPO_DIR/systemd/sennet-portal.service" /etc/systemd/system/sennet-portal.service

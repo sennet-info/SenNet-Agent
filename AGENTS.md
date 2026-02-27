@@ -39,6 +39,7 @@ Repo uses symlinks in:
 
 ## Portal Next.js
 - Runtime path: `/home/debian/sennet-portal`
-- Manual build: `cd /home/debian/sennet-portal && ./scripts/build_standalone.sh`
+- Manual build: `cd /home/debian/sennet-portal/portal && ./scripts/build_standalone.sh`
+- Service restart: `sudo systemctl restart sennet-portal.service`
 - Service logs: `journalctl -u sennet-portal.service -n 200 --no-pager`
 - URL: `http://<ip>:3000`

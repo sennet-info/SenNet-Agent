@@ -26,17 +26,17 @@ fi
 log "Running npm run build"
 npm run build
 
-log "Preparing standalone static assets"
+log "Preparing standalone assets"
 mkdir -p "$STANDALONE_DIR/.next"
 rm -rf "$STATIC_DEST"
-cp -a "$STATIC_SRC" "$STATIC_DEST"
+cp -r "$STATIC_SRC" "$STANDALONE_DIR/.next/"
 
 if [[ -d "$PUBLIC_DIR" ]]; then
   log "Copying public/ into standalone bundle"
   rm -rf "$PUBLIC_DEST"
-  cp -a "$PUBLIC_DIR" "$PUBLIC_DEST"
+  cp -r "$PUBLIC_DIR" "$STANDALONE_DIR/"
 else
-  log "No public/ directory found, skipping"
+  log "No public/ directory found, skipping public asset copy"
 fi
 
-log "Standalone build preparation completed successfully"
+log "Standalone build completed successfully"
