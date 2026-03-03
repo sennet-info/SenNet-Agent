@@ -7,7 +7,7 @@ const items = [
   {
     title: "Dashboards",
     description: "Visualiza métricas operativas en Chronograf.",
-    href: "/chronograf/",
+    href: "/dashboards",
     action: "Abrir Dashboards",
   },
   {
