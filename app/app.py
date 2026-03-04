@@ -5,7 +5,7 @@ import base64
 from datetime import datetime, date, timedelta
 import pandas as pd
 import time
-from main import run_analysis_discovery, get_discovery_options
+from main import run_analysis_discovery, get_discovery_options, _get_discovery_options_cached
 from modules.report_range import REPORT_RANGE_OPTIONS, DEFAULT_REPORT_RANGE_MODE, compute_report_range, to_flux_range
 
 FREQUENCY_DEFAULT_RANGE_MODE = {
@@ -113,18 +113,37 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+@st.cache_data(ttl=60, show_spinner=False)
 def load_tenants():
     if os.path.exists('config_tenants.json'):
-        with open('config_tenants.json', 'r') as f: return json.load(f)
+        with open('config_tenants.json', 'r') as f:
+            return json.load(f)
     return {}
+
 def save_tenants(data):
-    with open('config_tenants.json', 'w') as f: json.dump(data, f, indent=2)
-def load_roles():
+    with open('config_tenants.json', 'w') as f:
+        json.dump(data, f, indent=2)
+    load_tenants.clear()
+
+def clear_discovery_cache():
+    load_tenants.clear()
+    load_roles.clear()
+    _get_discovery_options_cached.clear()
+
+def _load_roles_file():
     if os.path.exists('device_roles.json'):
-        with open('device_roles.json', 'r') as f: return json.load(f)
+        with open('device_roles.json', 'r') as f:
+            return json.load(f)
     return {}
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_roles():
+    return _load_roles_file()
+
 def save_roles(data):
-    with open('device_roles.json', 'w') as f: json.dump(data, f, indent=2)
+    with open('device_roles.json', 'w') as f:
+        json.dump(data, f, indent=2)
+    load_roles.clear()
 
 def log_scheduler_event(event, **kwargs):
     log_file = "cron_log.log"
@@ -140,6 +159,11 @@ with st.sidebar:
     st.write("")
     mode = st.radio("NAVEGACIÓN", ["🔭 Explorador de Datos", "🏭 Inventario & Roles", "📅 Programador", "⚙️ Conexiones"])
     tenants = load_tenants(); t_names = list(tenants.keys()); sel_tenant = None
+    if st.button("🔄 Recargar conexiones", use_container_width=True):
+        clear_discovery_cache()
+        st.session_state.pop("analysis_cache", None)
+        st.success("Caché recargada")
+        st.rerun()
     if mode not in ["⚙️ Conexiones", "📅 Programador"]:
         st.markdown("---")
         if not tenants: st.warning("⚠️ Sin conexiones")
@@ -486,14 +510,19 @@ elif mode == "🔭 Explorador de Datos":
             with c_cost:
                 price = st.number_input("Coste (€/kWh)", 0.0, 10.0, 0.14)
                 debug_mode = st.checkbox("Debug")
+                max_workers = st.slider("Workers", min_value=1, max_value=6, value=4, help="Tuning recomendado BeaglePlay: 4-6")
+                force_recalculate = st.checkbox("Forzar recalcular", value=False)
             with c_act:
                 st.markdown("<br>", unsafe_allow_html=True)
                 start = st.button("🚀 GENERAR", type="primary", disabled=(not range_flux))
+                if st.button("♻️ Limpiar caché informe", use_container_width=True):
+                    st.session_state.pop("analysis_cache", None)
+                    st.success("Caché de informes limpiada")
 
         if start:
              with st.status("Procesando...", expanded=True) as status:
                 def up(m, p): status.update(label=f"{m} ({int(p*100)}%)", state="running")
-                pdf = run_analysis_discovery(sel_tenant, cl_influx, site, sel_devs, range_flux, price, up, serial=sel_serial, debug_mode=debug_mode)
+                pdf = run_analysis_discovery(sel_tenant, cl_influx, site, sel_devs, range_flux, price, up, serial=sel_serial, debug_mode=debug_mode, max_workers=max_workers, force_recalculate=force_recalculate)
                 if pdf and os.path.exists(pdf):
                     status.update(label="✅ **¡Listo!**", state="complete", expanded=False)
                     with open(pdf, "rb") as f:
@@ -502,3 +531,9 @@ elif mode == "🔭 Explorador de Datos":
                 else:
                     if not debug_mode: st.error("❌ Error.")
                     status.update(label="❌ Error", state="error")
+
+        if debug_mode:
+            timings = st.session_state.get("last_analysis_timings", {})
+            if timings:
+                st.markdown("### ⏱️ Timings")
+                st.json(timings)
