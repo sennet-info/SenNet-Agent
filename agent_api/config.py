@@ -4,6 +4,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parents[1]
 APP_DIR = BASE_DIR / "app"
 TENANTS_PATH = APP_DIR / "config_tenants.json"
+ROLES_PATH = APP_DIR / "device_roles.json"
 OUTPUT_DIR = (APP_DIR / "output").resolve()
 
 
@@ -38,6 +39,26 @@ def load_tenants_config():
     with TENANTS_PATH.open("r", encoding="utf-8") as handle:
         data = json.load(handle)
     return _normalize_tenants(data)
+
+
+def save_tenants_config(tenants: dict):
+    TENANTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with TENANTS_PATH.open("w", encoding="utf-8") as handle:
+        json.dump(tenants, handle, indent=2, ensure_ascii=False)
+
+
+def load_roles_config():
+    if not ROLES_PATH.exists():
+        return {}
+    with ROLES_PATH.open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    return data if isinstance(data, dict) else {}
+
+
+def save_roles_config(roles: dict):
+    ROLES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with ROLES_PATH.open("w", encoding="utf-8") as handle:
+        json.dump(roles, handle, indent=2, ensure_ascii=False)
 
 
 def get_tenant_auth(tenant: str):
