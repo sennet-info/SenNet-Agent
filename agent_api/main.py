@@ -1,3 +1,4 @@
+from typing import Optional
 import asyncio
 import os
 import sys
@@ -53,7 +54,7 @@ def discovery_devices(
     tenant: str = Query(...),
     client: str = Query(...),
     site: str = Query(...),
-    serial: str | None = Query(default=None),
+    serial: Optional[str] = Query(default=None),
 ):
     return {"items": list_devices(_tenant_auth_or_404(tenant), client, site, serial=serial)}
 
