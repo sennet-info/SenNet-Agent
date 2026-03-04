@@ -43,7 +43,8 @@ def generate_report_pdf(
     site,
     devices,
     range_flux,
-    price,
+    price=None,
+    default_price=None,
     serial=None,
     start_dt=None,
     end_dt=None,
@@ -51,6 +52,9 @@ def generate_report_pdf(
     callback_status=None,
     max_workers=4,
 ):
+    if price is None:
+        price = default_price if default_price is not None else 0.14
+
     fetcher = _get_data_fetcher(auth_config["url"], auth_config["token"], auth_config["org"])
 
     if start_dt and end_dt:
@@ -174,11 +178,11 @@ def generate_report_pdf(
                 if img_prof:
                     kpi_data["chart_img_2"] = img_prof
 
-    if not any(section for section in final_report_data.values()):
-        return None
+#     if not any(section for section in final_report_data.values()):
+#         return None
 
     try:
         return PDFComposer.build_report(f"{client}_{site}", final_report_data, output_dir)
     except Exception as exc:
         print(f"Error PDF: {exc}")
-        return None
+#         return None

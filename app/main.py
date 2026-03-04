@@ -54,7 +54,7 @@ def run_analysis_discovery(
     site,
     devices,
     range_flux="7d",
-    default_price=0.14,
+    price=0.14,
     callback_status=None,
     serial=None,
     debug_mode=False,
