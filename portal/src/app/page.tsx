@@ -12,9 +12,21 @@ const items = [
   },
   {
     title: "Informes",
-    description: "Accede al módulo de informes y reportes en Streamlit.",
+    description: "Genera reportes PDF desde la nueva UI nativa del portal.",
     href: "/informes",
     action: "Ver Informes",
+  },
+  {
+    title: "Conexiones",
+    description: "Gestiona tenants del agente (CRUD admin).",
+    href: "/conexiones",
+    action: "Administrar Conexiones",
+  },
+  {
+    title: "Inventario",
+    description: "Escanea dispositivos y asigna roles de inventario.",
+    href: "/inventario",
+    action: "Abrir Inventario",
   },
   {
     title: "Alertas",

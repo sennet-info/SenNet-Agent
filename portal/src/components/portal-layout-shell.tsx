@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, BellRing, FileText } from "lucide-react";
+import { BarChart3, BellRing, Cable, Factory, FileText } from "lucide-react";
 
 import { SidebarProvider, useSidebar } from "@/components/sidebar-context";
 
@@ -16,6 +16,16 @@ const navItems = [
     name: "Informes",
     href: "/informes",
     icon: FileText,
+  },
+  {
+    name: "Conexiones",
+    href: "/conexiones",
+    icon: Cable,
+  },
+  {
+    name: "Inventario",
+    href: "/inventario",
+    icon: Factory,
   },
   {
     name: "Alertas",

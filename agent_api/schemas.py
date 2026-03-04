@@ -3,6 +3,15 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+ROLE_OPTIONS = [
+    "consumption",
+    "generation",
+    "storage",
+    "meter_fluids",
+    "meter_people",
+    "environmental",
+]
+
 
 class ReportRequest(BaseModel):
     tenant: str
@@ -19,3 +28,14 @@ class ReportRequest(BaseModel):
 class ReportResponse(BaseModel):
     pdf_path: str
     filename: str
+
+
+class TenantUpsertRequest(BaseModel):
+    url: str = Field(min_length=1)
+    token: str = Field(min_length=1)
+    org: str = Field(min_length=1)
+    bucket: str = Field(min_length=1)
+
+
+class RoleUpsertRequest(BaseModel):
+    role: str = Field(min_length=1)

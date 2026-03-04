@@ -4,11 +4,20 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from agent_api.config import APP_DIR, OUTPUT_DIR, TenantNotFoundError, get_tenant_auth, safe_output_path
-from agent_api.schemas import ReportRequest, ReportResponse
+from agent_api.config import (
+    APP_DIR,
+    TenantNotFoundError,
+    get_tenant_auth,
+    load_roles_config,
+    load_tenants_config,
+    safe_output_path,
+    save_roles_config,
+    save_tenants_config,
+)
+from agent_api.schemas import ROLE_OPTIONS, ReportRequest, ReportResponse, RoleUpsertRequest, TenantUpsertRequest
 
 if str(APP_DIR) not in sys.path:
     sys.path.append(str(APP_DIR))
@@ -20,6 +29,19 @@ MAX_DEVICES = 50
 REPORT_TIMEOUT_SECONDS = 180
 
 app = FastAPI(title="SenNet Agent API", version="0.1.0")
+
+
+def _require_admin_token(authorization: Optional[str] = Header(default=None)):
+    expected = os.getenv("AGENT_ADMIN_TOKEN")
+    if not expected:
+        raise HTTPException(status_code=503, detail="AGENT_ADMIN_TOKEN no configurado")
+
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+
+    provided = authorization.split(" ", 1)[1].strip()
+    if provided != expected:
+        raise HTTPException(status_code=401, detail="Invalid bearer token")
 
 
 @app.get("/v1/health")
@@ -111,3 +133,63 @@ def download_report(path: str = Query(...)):
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
 
     return FileResponse(path=safe_path, media_type="application/pdf", filename=safe_path.name)
+
+
+@app.get("/v1/admin/tenants", dependencies=[Depends(_require_admin_token)])
+def admin_list_tenants():
+    return {"items": load_tenants_config()}
+
+
+@app.put("/v1/admin/tenants/{alias}", dependencies=[Depends(_require_admin_token)])
+def admin_upsert_tenant(alias: str, payload: TenantUpsertRequest):
+    alias = alias.strip()
+    if not alias:
+        raise HTTPException(status_code=422, detail="Alias inválido")
+
+    tenants = load_tenants_config()
+    tenants[alias] = payload.model_dump()
+    save_tenants_config(tenants)
+    return {"ok": True, "alias": alias, "tenant": tenants[alias]}
+
+
+@app.delete("/v1/admin/tenants/{alias}", dependencies=[Depends(_require_admin_token)])
+def admin_delete_tenant(alias: str):
+    tenants = load_tenants_config()
+    if alias not in tenants:
+        raise HTTPException(status_code=404, detail=f"Tenant '{alias}' no existe")
+
+    removed = tenants.pop(alias)
+    save_tenants_config(tenants)
+    return {"ok": True, "alias": alias, "tenant": removed}
+
+
+@app.get("/v1/admin/roles", dependencies=[Depends(_require_admin_token)])
+def admin_list_roles():
+    return {"items": load_roles_config(), "role_options": ROLE_OPTIONS}
+
+
+@app.put("/v1/admin/roles/{device}", dependencies=[Depends(_require_admin_token)])
+def admin_upsert_role(device: str, payload: RoleUpsertRequest):
+    role = payload.role.strip()
+    if role not in ROLE_OPTIONS:
+        raise HTTPException(status_code=422, detail=f"role inválido. Opciones: {', '.join(ROLE_OPTIONS)}")
+
+    device = device.strip()
+    if not device:
+        raise HTTPException(status_code=422, detail="device inválido")
+
+    roles = load_roles_config()
+    roles[device] = role
+    save_roles_config(roles)
+    return {"ok": True, "device": device, "role": role}
+
+
+@app.delete("/v1/admin/roles/{device}", dependencies=[Depends(_require_admin_token)])
+def admin_delete_role(device: str):
+    roles = load_roles_config()
+    if device not in roles:
+        raise HTTPException(status_code=404, detail=f"device '{device}' no existe")
+
+    removed = roles.pop(device)
+    save_roles_config(roles)
+    return {"ok": True, "device": device, "role": removed}
