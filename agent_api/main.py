@@ -3,9 +3,10 @@ import asyncio
 import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from agent_api.config import (
@@ -18,16 +19,31 @@ from agent_api.config import (
     save_roles_config,
     save_tenants_config,
 )
-from agent_api.schemas import ROLE_OPTIONS, ReportRequest, ReportResponse, RoleUpsertRequest, TenantUpsertRequest
+from agent_api.schemas import (
+    ROLE_OPTIONS,
+    ReportRequest,
+    ReportResponse,
+    RoleUpsertRequest,
+    SchedulerRunRequest,
+    SchedulerTaskCreateRequest,
+    SchedulerTaskUpdateRequest,
+    SmtpConfigRequest,
+    SmtpTestRequest,
+    TenantUpsertRequest,
+)
+from agent_api.scheduler_store import list_tasks, mask_smtp, save_tasks, smtp_store
 
 if str(APP_DIR) not in sys.path:
     sys.path.append(str(APP_DIR))
 
 from core.discovery import list_clients, list_devices, list_serials, list_sites
 from core.report import generate_report_pdf
+from modules.email_sender import EmailSender
+from modules.report_range import compute_report_range, to_flux_range
 
 MAX_DEVICES = 50
 REPORT_TIMEOUT_SECONDS = 180
+SCHEDULER_RUN_TIMEOUT_SECONDS = 240
 
 app = FastAPI(title="SenNet Agent API", version="0.1.0")
 
@@ -43,6 +59,16 @@ def _require_admin_token(authorization: Optional[str] = Header(default=None)):
     provided = authorization.split(" ", 1)[1].strip()
     if provided != expected:
         raise HTTPException(status_code=401, detail="Invalid bearer token")
+
+
+def _require_admin_for_tasks_read(authorization: Optional[str] = Header(default=None)):
+    require_token = os.getenv("REQUIRE_ADMIN_FOR_READ", "false").lower() == "true"
+    if require_token:
+        _require_admin_token(authorization)
+
+
+def _require_admin_for_smtp_read(authorization: Optional[str] = Header(default=None)):
+    _require_admin_token(authorization)
 
 
 @app.get("/v1/health")
@@ -188,6 +214,179 @@ def download_report_debug(path: str = Query(...)):
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
 
     return FileResponse(path=safe_path, media_type="application/json", filename=safe_path.name)
+
+
+@app.get("/v1/scheduler/tasks", dependencies=[Depends(_require_admin_for_tasks_read)])
+def scheduler_list_tasks():
+    tasks = []
+    for task in list_tasks():
+        clean = dict(task)
+        clean.pop("influx_token", None)
+        tasks.append(clean)
+    return {"items": tasks}
+
+
+def _validate_task_business_rules(task: dict):
+    if not task.get("tenant_alias"):
+        raise HTTPException(status_code=422, detail="tenant es obligatorio")
+    if not task.get("client") or not task.get("site"):
+        raise HTTPException(status_code=422, detail="client y site son obligatorios")
+    if not task.get("device"):
+        raise HTTPException(status_code=422, detail="device principal obligatorio")
+    if not task.get("emails"):
+        raise HTTPException(status_code=422, detail="emails requerido")
+    if not (task.get("range_flux") or task.get("report_range_mode") or (task.get("start_dt") and task.get("end_dt"))):
+        raise HTTPException(status_code=422, detail="Define report_range_mode, range_flux o start_dt/end_dt")
+    if task.get("frequency") == "weekly" and task.get("weekday") is None:
+        raise HTTPException(status_code=422, detail="weekday obligatorio para frecuencia weekly")
+
+
+@app.post("/v1/scheduler/tasks", dependencies=[Depends(_require_admin_token)])
+def scheduler_create_task(payload: SchedulerTaskCreateRequest):
+    task = payload.model_dump(by_alias=False)
+    _validate_task_business_rules(task)
+
+    tasks = list_tasks()
+    task["start_dt"] = task.get("start_dt").isoformat() if task.get("start_dt") else None
+    task["end_dt"] = task.get("end_dt").isoformat() if task.get("end_dt") else None
+    tasks.append(task)
+    saved = save_tasks(tasks)
+    return {"ok": True, "task": saved[-1]}
+
+
+@app.put("/v1/scheduler/tasks/{task_id}", dependencies=[Depends(_require_admin_token)])
+def scheduler_update_task(task_id: str, payload: SchedulerTaskUpdateRequest):
+    tasks = list_tasks()
+    patch = payload.model_dump(exclude_unset=True, by_alias=False)
+    for key in ["start_dt", "end_dt"]:
+        if key in patch and isinstance(patch[key], datetime):
+            patch[key] = patch[key].isoformat()
+
+    updated_task = None
+    for task in tasks:
+        if task.get("id") == task_id:
+            task.update(patch)
+            _validate_task_business_rules(task)
+            updated_task = task
+            break
+
+    if not updated_task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+
+    save_tasks(tasks)
+    return {"ok": True, "task": updated_task}
+
+
+@app.delete("/v1/scheduler/tasks/{task_id}", dependencies=[Depends(_require_admin_token)])
+def scheduler_delete_task(task_id: str):
+    tasks = list_tasks()
+    filtered = [task for task in tasks if task.get("id") != task_id]
+    if len(filtered) == len(tasks):
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    save_tasks(filtered)
+    return {"ok": True}
+
+
+@app.post("/v1/scheduler/tasks/{task_id}/run", dependencies=[Depends(_require_admin_token)])
+async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(default=SchedulerRunRequest())):
+    task = next((item for item in list_tasks() if item.get("id") == task_id), None)
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+
+    devices = [task["device"], *task.get("extra_devices", [])]
+    if len(devices) > MAX_DEVICES:
+        raise HTTPException(status_code=422, detail=f"devices excede el máximo permitido ({MAX_DEVICES})")
+
+    start_dt = None
+    end_dt = None
+    range_flux = task.get("range_flux")
+    if not range_flux:
+        if task.get("start_dt") and task.get("end_dt"):
+            start_dt = datetime.fromisoformat(task["start_dt"])
+            end_dt = datetime.fromisoformat(task["end_dt"])
+        else:
+            start_dt, end_dt = compute_report_range(task.get("report_range_mode"))
+        range_flux = to_flux_range(start_dt, end_dt)
+
+    auth_config = _tenant_auth_or_404(task["tenant_alias"])
+
+    async def _build():
+        return await asyncio.to_thread(
+            generate_report_pdf,
+            auth_config,
+            task["client"],
+            task["site"],
+            devices,
+            range_flux,
+            0.14,
+            task.get("serial"),
+            start_dt,
+            end_dt,
+            False,
+            None,
+            payload.max_workers,
+            payload.debug,
+            payload.debug_sample_n,
+            payload.force_recalculate,
+        )
+
+    original_cwd = Path.cwd()
+    try:
+        os.chdir(APP_DIR)
+        build_result = await asyncio.wait_for(_build(), timeout=SCHEDULER_RUN_TIMEOUT_SECONDS)
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Timeout ejecutando tarea") from exc
+    finally:
+        os.chdir(original_cwd)
+
+    if payload.debug:
+        pdf_path, debug_payload = build_result
+    else:
+        pdf_path = build_result
+        debug_payload = None
+
+    if not pdf_path:
+        raise HTTPException(status_code=500, detail="No se pudo generar el PDF")
+
+    safe_path = safe_output_path(pdf_path)
+    if not safe_path.exists():
+        raise HTTPException(status_code=500, detail="PDF generado no encontrado en disco")
+
+    return {"ok": True, "pdf_path": str(safe_path), "filename": safe_path.name, "debug": debug_payload}
+
+
+@app.get("/v1/scheduler/smtp", dependencies=[Depends(_require_admin_for_smtp_read)])
+def scheduler_get_smtp():
+    cfg = smtp_store().read(default={})
+    if not isinstance(cfg, dict):
+        raise HTTPException(status_code=500, detail="smtp_config.json inválido")
+    return {"item": mask_smtp(cfg)}
+
+
+@app.put("/v1/scheduler/smtp", dependencies=[Depends(_require_admin_token)])
+def scheduler_put_smtp(payload: SmtpConfigRequest):
+    new_cfg = payload.model_dump()
+    current_cfg = smtp_store().read(default={})
+    if not new_cfg.get("password"):
+        new_cfg["password"] = current_cfg.get("password", "")
+
+    smtp_store().update(default={}, mutate_fn=lambda _prev: new_cfg)
+    return {"ok": True, "item": mask_smtp(new_cfg)}
+
+
+@app.post("/v1/scheduler/smtp/test", dependencies=[Depends(_require_admin_token)])
+def scheduler_test_smtp(payload: SmtpTestRequest):
+    cfg = smtp_store().read(default={})
+    required = ["server", "port", "user", "password"]
+    missing = [key for key in required if not cfg.get(key)]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"SMTP incompleto: faltan {', '.join(missing)}")
+
+    sender = EmailSender(cfg["server"], cfg["port"], cfg["user"], cfg["password"])
+    ok, detail = sender.send_email([payload.recipient], "Test SMTP SenNet", "Correo de prueba SMTP")
+    if not ok:
+        raise HTTPException(status_code=500, detail=detail)
+    return {"ok": True, "detail": detail}
 
 
 @app.get("/v1/admin/tenants", dependencies=[Depends(_require_admin_token)])

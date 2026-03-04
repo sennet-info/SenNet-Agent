@@ -6,6 +6,9 @@ After=network.target
 Type=simple
 User=debian
 WorkingDirectory=/opt/sennet-agent/repo
+Environment=SCHEDULED_TASKS_PATH=/opt/sennet-agent/scheduled_tasks.json
+Environment=SMTP_CONFIG_PATH=/opt/sennet-agent/smtp_config.json
+Environment=AGENT_ADMIN_TOKEN=CHANGE_ME
 ExecStart=/opt/sennet-agent/venv/bin/uvicorn agent_api.main:app --host 0.0.0.0 --port 8000
 Restart=on-failure
 RestartSec=5

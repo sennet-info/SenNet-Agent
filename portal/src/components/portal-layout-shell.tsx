@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, BellRing, Cable, Factory, FileText } from "lucide-react";
+import { BarChart3, BellRing, Cable, CalendarClock, Factory, FileText } from "lucide-react";
 
 import { SidebarProvider, useSidebar } from "@/components/sidebar-context";
 
@@ -31,6 +31,11 @@ const navItems = [
     name: "Alertas",
     href: "/alertas",
     icon: BellRing,
+  },
+  {
+    name: "Programador",
+    href: "/programador",
+    icon: CalendarClock,
   },
 ];
 
