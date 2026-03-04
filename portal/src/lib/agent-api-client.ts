@@ -15,11 +15,27 @@ export type ReportPayload = {
   price: number;
   start_dt?: string;
   end_dt?: string;
+  debug?: boolean;
+  debug_sample_n?: number;
+  max_workers?: number;
+  force_recalculate?: boolean;
+};
+
+export type ReportDebug = {
+  inputs?: Record<string, unknown>;
+  resolved_range?: Record<string, unknown>;
+  query_proof?: Record<string, unknown>;
+  stats?: Record<string, unknown>;
+  sample_rows?: Record<string, unknown>;
+  timings_ms?: Record<string, unknown>;
+  warnings?: string[];
 };
 
 export type ReportResult = {
   pdf_path: string;
   filename: string;
+  debug_path?: string | null;
+  debug?: ReportDebug | null;
 };
 
 const DEFAULT_BASE = process.env.NEXT_PUBLIC_PORTAL_AGENT_API_BASE ?? process.env.PORTAL_AGENT_API_BASE ?? "/api/agent";
@@ -86,6 +102,10 @@ export async function createReport(payload: ReportPayload) {
 
 export function downloadUrl(pdfPath: string) {
   return buildUrl("/v1/reports/download", { path: pdfPath });
+}
+
+export function downloadDebugUrl(debugPath: string) {
+  return buildUrl("/v1/reports/download-debug", { path: debugPath });
 }
 
 export async function adminListTenants(token: string) {

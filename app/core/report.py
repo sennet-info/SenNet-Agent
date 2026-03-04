@@ -1,5 +1,7 @@
 import os
 import time
+import hashlib
+from datetime import timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
@@ -50,11 +52,29 @@ def generate_report_pdf(
     debug_mode=False,
     callback_status=None,
     max_workers=4,
+    collect_debug=False,
+    debug_sample_n=10,
+    force_recalculate=False,
 ):
+    total_started = time.perf_counter()
+    discovery_started = time.perf_counter()
     fetcher = _get_data_fetcher(auth_config["url"], auth_config["token"], auth_config["org"])
+
+    debug_queries = []
+    if collect_debug:
+        fetcher.set_debug_query_recorder(lambda query, metadata: debug_queries.append({"query": query, "metadata": metadata}))
 
     if start_dt and end_dt:
         range_flux = to_flux_range(start_dt, end_dt)
+
+    resolved_start = pd.Timestamp(start_dt).isoformat() if start_dt else None
+    resolved_end = pd.Timestamp(end_dt).isoformat() if end_dt else None
+    if start_dt and end_dt:
+        tz_value = pd.Timestamp(start_dt).tzinfo
+    else:
+        tz_value = timezone.utc
+
+    discovery_elapsed = time.perf_counter() - discovery_started
 
     output_dir = os.path.abspath("output")
     os.makedirs(output_dir, exist_ok=True)
@@ -76,6 +96,71 @@ def generate_report_pdf(
                 )
 
     final_report_data = {period["section"]: {} for period in periods}
+    timings = {
+        "discovery": discovery_elapsed,
+        "fetch": 0.0,
+        "charts": 0.0,
+        "pdf": 0.0,
+        "total": 0.0,
+    }
+    stats_by_series = {}
+    sample_rows = {}
+    warnings = []
+
+    def _to_df(frame):
+        if isinstance(frame, list):
+            if not frame:
+                return pd.DataFrame()
+            return pd.concat(frame, ignore_index=True)
+        return frame if isinstance(frame, pd.DataFrame) else pd.DataFrame()
+
+    def _safe_iso(value):
+        if value is None or pd.isna(value):
+            return None
+        ts = pd.Timestamp(value)
+        return ts.isoformat()
+
+    def _series_name(device_name, column_name):
+        return f"{device_name}:{column_name}"
+
+    def _collect_series_stats(device_name, df):
+        clean_df = _to_df(df)
+        if clean_df.empty:
+            return
+        time_col = "_time" if "_time" in clean_df.columns else None
+        if not time_col:
+            return
+        for column in clean_df.columns:
+            if column.startswith("result") or column.startswith("table") or column in {"_time", "_start", "_stop", "_measurement", "device", "client", "site_name", "SerialNumber"}:
+                continue
+            numeric_series = pd.to_numeric(clean_df[column], errors="coerce").dropna()
+            if numeric_series.empty:
+                continue
+            mask = pd.to_numeric(clean_df[column], errors="coerce").notna()
+            filtered = clean_df.loc[mask, [time_col, column]].copy()
+            if filtered.empty:
+                continue
+            key = _series_name(device_name, column)
+            points = int(len(filtered))
+            first_ts = _safe_iso(filtered[time_col].min())
+            last_ts = _safe_iso(filtered[time_col].max())
+            previous = stats_by_series.get(key)
+            if previous:
+                points += previous["points"]
+                first_ts = min(v for v in [first_ts, previous["first_ts"]] if v)
+                last_ts = max(v for v in [last_ts, previous["last_ts"]] if v)
+            stats_by_series[key] = {
+                "device": device_name,
+                "series": column,
+                "points": points,
+                "first_ts": first_ts,
+                "last_ts": last_ts,
+            }
+            if key not in sample_rows:
+                sample_rows[key] = [
+                    {"ts": _safe_iso(row[time_col]), "value": float(row[column])}
+                    for _, row in filtered.head(max(1, debug_sample_n)).iterrows()
+                ]
 
     def _process_device_period(dev_name, period):
         section_name = period["section"]
@@ -101,6 +186,8 @@ def generate_report_pdf(
             "kpis": kpis,
             "fetch_elapsed": fetch_elapsed,
             "analysis_elapsed": analysis_elapsed,
+            "df_daily": df_daily,
+            "df_raw": df_raw,
         }
 
     work = [(dev_name, period) for dev_name in devices for period in periods]
@@ -114,6 +201,9 @@ def generate_report_pdf(
                 callback_status(f"Analizando: {dev_name}", processed / total)
             try:
                 result = _process_device_period(dev_name, period)
+                timings["fetch"] += result["fetch_elapsed"]
+                _collect_series_stats(result["device"], result["df_daily"])
+                _collect_series_stats(result["device"], result["df_raw"])
                 if result["kpis"]:
                     for kpi in result["kpis"]:
                         key = f"{dev_name} {kpi.get('suffix_name', '')}".strip()
@@ -126,6 +216,7 @@ def generate_report_pdf(
                         "label_sec": "",
                     }
             except Exception as exc:
+                warnings.append(f"Error analizando {dev_name}: {exc}")
                 print(f"Error analizando {dev_name}: {exc}")
     else:
         worker_count = max(1, min(int(max_workers), len(work))) if work else 1
@@ -138,6 +229,9 @@ def generate_report_pdf(
                     callback_status(f"Analizando: {dev_name}", processed / total)
                 try:
                     result = future.result()
+                    timings["fetch"] += result["fetch_elapsed"]
+                    _collect_series_stats(result["device"], result["df_daily"])
+                    _collect_series_stats(result["device"], result["df_raw"])
                     if result["kpis"]:
                         for kpi in result["kpis"]:
                             key = f"{dev_name} {kpi.get('suffix_name', '')}".strip()
@@ -150,11 +244,13 @@ def generate_report_pdf(
                             "label_sec": "",
                         }
                 except Exception as exc:
+                    warnings.append(f"Error analizando {dev_name}: {exc}")
                     print(f"Error analizando {dev_name}: {exc}")
 
     if callback_status:
         callback_status("Generando PDF...", 1.0)
 
+    charts_started = time.perf_counter()
     for section_data in final_report_data.values():
         for kpi_data in section_data.values():
             if "chart_data" in kpi_data and kpi_data["chart_data"]:
@@ -173,12 +269,58 @@ def generate_report_pdf(
                 img_prof = Visualizer.create_hourly_profile(kpi_data["chart_profile"])
                 if img_prof:
                     kpi_data["chart_img_2"] = img_prof
+    timings["charts"] = time.perf_counter() - charts_started
 
     if not any(section for section in final_report_data.values()):
-        return None
+        fetcher.set_debug_query_recorder(None)
+        return (None, {}) if collect_debug else None
 
     try:
-        return PDFComposer.build_report(f"{client}_{site}", final_report_data, output_dir)
+        pdf_started = time.perf_counter()
+        pdf_path = PDFComposer.build_report(f"{client}_{site}", final_report_data, output_dir)
+        timings["pdf"] = time.perf_counter() - pdf_started
+        timings["total"] = time.perf_counter() - total_started
+
+        debug_payload = {}
+        if collect_debug:
+            query_text = "\n\n".join(item["query"].strip() for item in debug_queries)
+            snippet_lines = query_text.splitlines()[:30]
+            snippet = "\n".join(snippet_lines)
+            snippet = snippet.encode("utf-8")[:2048].decode("utf-8", errors="ignore")
+            total_points = sum(item["points"] for item in stats_by_series.values())
+            debug_payload = {
+                "inputs": {
+                    "client": client,
+                    "site": site,
+                    "serial": serial,
+                    "devices": devices,
+                    "range_flux": range_flux,
+                    "price": price,
+                    "max_workers": max_workers,
+                    "force_recalculate": force_recalculate,
+                },
+                "resolved_range": {
+                    "start": resolved_start,
+                    "stop": resolved_end,
+                    "timezone": str(tz_value) if tz_value else "UTC",
+                },
+                "query_proof": {
+                    "sha256": hashlib.sha256(query_text.encode("utf-8")).hexdigest() if query_text else None,
+                    "snippet": snippet,
+                },
+                "stats": {
+                    "total_series": len(stats_by_series),
+                    "total_points": total_points,
+                    "series": list(stats_by_series.values()),
+                },
+                "sample_rows": sample_rows,
+                "timings_ms": {key: int(value * 1000) for key, value in timings.items()},
+                "warnings": warnings,
+            }
+
+        fetcher.set_debug_query_recorder(None)
+        return (pdf_path, debug_payload) if collect_debug else pdf_path
     except Exception as exc:
         print(f"Error PDF: {exc}")
-        return None
+        fetcher.set_debug_query_recorder(None)
+        return (None, {}) if collect_debug else None
