@@ -1,0 +1,14 @@
+[Unit]
+Description=SenNet Agent API (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+User=debian
+WorkingDirectory=/opt/sennet-agent/repo
+ExecStart=/opt/sennet-agent/venv/bin/uvicorn agent_api.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
