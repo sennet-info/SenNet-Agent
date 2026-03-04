@@ -1,5 +1,6 @@
 from typing import Optional
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
@@ -101,16 +102,27 @@ async def create_report(payload: ReportRequest):
             payload.start_dt,
             payload.end_dt,
             False,
+            None,
+            payload.max_workers,
+            payload.debug,
+            payload.debug_sample_n,
+            payload.force_recalculate,
         )
 
     original_cwd = Path.cwd()
     try:
         os.chdir(APP_DIR)
-        pdf_path = await asyncio.wait_for(_build(), timeout=REPORT_TIMEOUT_SECONDS)
+        build_result = await asyncio.wait_for(_build(), timeout=REPORT_TIMEOUT_SECONDS)
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail="Tiempo de generación agotado") from exc
     finally:
         os.chdir(original_cwd)
+
+    if payload.debug:
+        pdf_path, debug_payload = build_result
+    else:
+        pdf_path = build_result
+        debug_payload = None
 
     if not pdf_path:
         raise HTTPException(status_code=500, detail="No se pudo generar el PDF")
@@ -119,7 +131,37 @@ async def create_report(payload: ReportRequest):
     if not safe_path.exists():
         raise HTTPException(status_code=500, detail="PDF generado no encontrado en disco")
 
-    return ReportResponse(pdf_path=str(safe_path), filename=safe_path.name)
+    debug_path_value = None
+    debug_inline = None
+    if payload.debug and debug_payload is not None:
+        enriched_debug = {
+            **debug_payload,
+            "inputs": {
+                **debug_payload.get("inputs", {}),
+                "tenant": payload.tenant,
+                "client": payload.client,
+                "site": payload.site,
+                "serial": payload.serial,
+                "devices": payload.devices,
+                "range_flux": payload.range_flux,
+                "start_dt": payload.start_dt.isoformat() if payload.start_dt else None,
+                "end_dt": payload.end_dt.isoformat() if payload.end_dt else None,
+                "price": payload.price,
+                "max_workers": payload.max_workers,
+                "force_recalculate": payload.force_recalculate,
+            },
+        }
+
+        debug_filename = safe_path.with_suffix(".debug.json").name
+        debug_file = safe_output_path(debug_filename)
+        debug_file.write_text(json.dumps(enriched_debug, ensure_ascii=False, indent=2), encoding="utf-8")
+        debug_path_value = str(debug_file)
+
+        inline_data = json.dumps(enriched_debug, ensure_ascii=False)
+        if len(inline_data.encode("utf-8")) <= 64_000:
+            debug_inline = enriched_debug
+
+    return ReportResponse(pdf_path=str(safe_path), filename=safe_path.name, debug_path=debug_path_value, debug=debug_inline)
 
 
 @app.get("/v1/reports/download")
@@ -133,6 +175,19 @@ def download_report(path: str = Query(...)):
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
 
     return FileResponse(path=safe_path, media_type="application/pdf", filename=safe_path.name)
+
+
+@app.get("/v1/reports/download-debug")
+def download_report_debug(path: str = Query(...)):
+    try:
+        safe_path = safe_output_path(path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not safe_path.exists() or not safe_path.is_file():
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+
+    return FileResponse(path=safe_path, media_type="application/json", filename=safe_path.name)
 
 
 @app.get("/v1/admin/tenants", dependencies=[Depends(_require_admin_token)])

@@ -1,6 +1,7 @@
 from influxdb_client import InfluxDBClient
 import pandas as pd
 from threading import Lock
+from typing import Any, Callable, Optional
 
 
 class DataFetcher:
@@ -16,6 +17,22 @@ class DataFetcher:
                 self._CLIENT_CACHE[cache_key] = client
         self.client = client
         self.query_api = self.client.query_api()
+        self._debug_query_recorder: Optional[Callable[[str, dict[str, Any]], None]] = None
+
+    def set_debug_query_recorder(self, recorder: Optional[Callable[[str, dict[str, Any]], None]]):
+        self._debug_query_recorder = recorder
+
+    def _record_query(self, query: str, metadata: dict[str, Any]):
+        if self._debug_query_recorder:
+            self._debug_query_recorder(query, metadata)
+
+    @staticmethod
+    def _range_line(range_val):
+        if "start:" in str(range_val):
+            return f"|> range({range_val})"
+        if "d" in str(range_val):
+            return f"|> range(start: -{range_val})"
+        return "|> range(start: -7d)"
 
     # --- Discovery (Sin cambios) ---
     def get_clients(self, bucket):
@@ -49,16 +66,7 @@ class DataFetcher:
 
     # --- QUERIES CORREGIDAS (Respetan el rango del usuario) ---
     def get_data_daily(self, bucket, device_name, range_val, client=None, site=None, serial=None):
-        range_line = ""
-        if "start:" in str(range_val):
-            range_line = f"|> range({range_val})"
-        elif 'd' in str(range_val):
-            try:
-                range_line = f"|> range(start: -{range_val})"
-            except Exception:
-                range_line = "|> range(start: -7d)"
-        else:
-            range_line = "|> range(start: -7d)"
+        range_line = self._range_line(range_val)
 
         filter_c = f'|> filter(fn: (r) => r["client"] == "{client}")' if client else ''
         filter_s = f'|> filter(fn: (r) => r["site_name"] == "{site}")' if site else ''
@@ -73,16 +81,11 @@ class DataFetcher:
         |> timeShift(duration: 1h)
         |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
         '''
+        self._record_query(query, {"type": "daily", "device": device_name})
         return self.query_api.query_data_frame(query)
 
     def get_data_raw(self, bucket, device_name, range_val, client=None, site=None, serial=None):
-        range_line = ""
-        if "start:" in str(range_val):
-            range_line = f"|> range({range_val})"
-        elif 'd' in str(range_val):
-            range_line = f"|> range(start: -{range_val})"
-        else:
-            range_line = "|> range(start: -7d)"
+        range_line = self._range_line(range_val)
 
         filter_c = f'|> filter(fn: (r) => r["client"] == "{client}")' if client else ''
         filter_s = f'|> filter(fn: (r) => r["site_name"] == "{site}")' if site else ''
@@ -94,4 +97,5 @@ class DataFetcher:
          {filter_c} {filter_s} {filter_ser}
          |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
          '''
+        self._record_query(query, {"type": "raw", "device": device_name})
         return self.query_api.query_data_frame(query)

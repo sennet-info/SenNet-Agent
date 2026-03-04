@@ -9,6 +9,7 @@ import {
   discoveryDevices,
   discoverySerials,
   discoverySites,
+  downloadDebugUrl,
   downloadUrl,
   ReportResult,
 } from "@/lib/agent-api-client";
@@ -37,6 +38,8 @@ export default function InformesPage() {
   const [customEnd, setCustomEnd] = useState("");
   const [price, setPrice] = useState(0.14);
   const [workers] = useState(1);
+  const [forceRecalculate] = useState(false);
+  const [debug, setDebug] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<ReportResult | null>(null);
@@ -114,6 +117,9 @@ export default function InformesPage() {
         serial: serial || undefined,
         devices: selected,
         price,
+        max_workers: workers,
+        force_recalculate: forceRecalculate,
+        debug,
         ...rangePayload,
       });
       setResult(report);
@@ -188,16 +194,39 @@ export default function InformesPage() {
         <input type="number" value={workers} disabled className="rounded border border-slate-700 bg-slate-950 p-2 opacity-60" />
       </div>
 
-      <button className="rounded bg-emerald-700 px-4 py-2" disabled={loading || selected.length === 0} onClick={generateReport} type="button">
-        {loading ? "Generando..." : "Generar"}
-      </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button className="rounded bg-emerald-700 px-4 py-2" disabled={loading || selected.length === 0} onClick={generateReport} type="button">
+          {loading ? "Generando..." : "Generar"}
+        </button>
+
+        <label className="inline-flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={debug} onChange={(event) => setDebug(event.target.checked)} />
+          Debug
+        </label>
+      </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
       {result && (
-        <a href={downloadUrl(result.pdf_path)} target="_blank" rel="noreferrer" className="inline-block rounded bg-blue-700 px-4 py-2">
-          Descargar PDF ({result.filename})
-        </a>
+        <div className="flex flex-wrap gap-3">
+          <a href={downloadUrl(result.pdf_path)} target="_blank" rel="noreferrer" className="inline-block rounded bg-blue-700 px-4 py-2">
+            Descargar PDF ({result.filename})
+          </a>
+          {result.debug_path && (
+            <a href={downloadDebugUrl(result.debug_path)} target="_blank" rel="noreferrer" className="inline-block rounded bg-indigo-700 px-4 py-2">
+              Descargar debug.json
+            </a>
+          )}
+        </div>
+      )}
+
+      {debug && result?.debug && (
+        <div className="space-y-2 rounded border border-indigo-700/60 bg-slate-950/70 p-3">
+          <h3 className="text-lg font-semibold text-indigo-300">Debug</h3>
+          <pre className="max-h-[420px] overflow-auto rounded bg-slate-900 p-3 text-xs text-slate-200">
+            {JSON.stringify(result.debug, null, 2)}
+          </pre>
+        </div>
       )}
     </section>
   );

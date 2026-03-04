@@ -44,6 +44,46 @@ curl -s -X POST http://127.0.0.1:8000/v1/reports \
 curl -L 'http://127.0.0.1:8000/v1/reports/download?path=<pdf_path>' -o reporte.pdf
 ```
 
+### Debug demo-friendly (reportes)
+
+Activa `debug=true` para generar el PDF y un `debug.json` correlacionado en `app/output`.
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/v1/reports \
+  -H 'content-type: application/json' \
+  -d '{
+    "tenant":"<tenant>",
+    "client":"<client>",
+    "site":"<site>",
+    "devices":["<device>"],
+    "range_flux":"7d",
+    "price":0.14,
+    "debug":true,
+    "debug_sample_n":10
+  }'
+```
+
+La respuesta incluye `debug_path` y, cuando el payload es pequeño, también `debug` inline. El `debug.json` contiene:
+
+- inputs efectivos usados para la consulta,
+- rango resuelto (start/stop/timezone),
+- query proof (sha256 + snippet truncado),
+- data proof (series/puntos + first/last ts),
+- sample rows,
+- timings en ms.
+
+Descarga del artefacto:
+
+```bash
+curl -L 'http://127.0.0.1:8000/v1/reports/download-debug?path=<debug_path>' -o debug.json
+```
+
+Verifica existencia local (si ejecutas API en este repo):
+
+```bash
+test -f app/output/<archivo>.debug.json && echo "debug.json OK"
+```
+
 ### Admin (Bearer token)
 
 ```bash
@@ -87,6 +127,8 @@ Rutas nuevas:
 - `/conexiones`
 - `/inventario`
 - `/informes`
+
+En `/informes` puedes activar el toggle **Debug** antes de "Generar" para enviar `debug=true`, renderizar el panel de evidencia y habilitar el botón **Descargar debug.json**.
 
 Smoke test API:
 

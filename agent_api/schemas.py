@@ -23,11 +23,17 @@ class ReportRequest(BaseModel):
     serial: Optional[str] = None
     start_dt: Optional[datetime] = None
     end_dt: Optional[datetime] = None
+    debug: bool = False
+    debug_sample_n: int = Field(default=10, ge=1, le=50)
+    max_workers: int = Field(default=4, ge=1, le=16)
+    force_recalculate: bool = False
 
 
 class ReportResponse(BaseModel):
     pdf_path: str
     filename: str
+    debug_path: Optional[str] = None
+    debug: Optional[dict] = None
 
 
 class TenantUpsertRequest(BaseModel):
