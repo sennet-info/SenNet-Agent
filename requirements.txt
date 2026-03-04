@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy
+matplotlib
+influxdb-client
+jinja2
+weasyprint
+fastapi
+uvicorn
+pydantic
