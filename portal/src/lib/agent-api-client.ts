@@ -22,6 +22,38 @@ export type ReportPayload = {
   force_recalculate?: boolean;
 };
 
+export type SchedulerTaskPayload = {
+  tenant: string;
+  client: string;
+  site: string;
+  serial?: string;
+  device: string;
+  extra_devices?: string[];
+  frequency: "daily" | "weekly" | "monthly" | "cron";
+  time: string;
+  weekday?: number;
+  cron?: string;
+  report_range_mode?: string;
+  range_flux?: string;
+  start_dt?: string;
+  end_dt?: string;
+  emails: string[];
+  enabled?: boolean;
+  name?: string;
+};
+
+export type SchedulerTask = SchedulerTaskPayload & {
+  id: string;
+  tenant_alias?: string;
+  created_at?: string;
+};
+
+export type SmtpConfigPayload = {
+  server: string;
+  port: number;
+  user: string;
+  password: string;
+};
 
 export type ReportResult = {
   pdf_path: string;
@@ -98,6 +130,75 @@ export function downloadUrl(pdfPath: string) {
 
 export function downloadDebugUrl(debugPath: string) {
   return buildUrl("/v1/reports/download-debug", { path: debugPath });
+}
+
+export async function schedulerListTasks(token?: string) {
+  const response = await fetch(buildUrl("/v1/scheduler/tasks"), {
+    cache: "no-store",
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  return parseJsonResponse<{ items: SchedulerTask[] }>(response);
+}
+
+export async function schedulerCreateTask(token: string, payload: SchedulerTaskPayload) {
+  const response = await fetch(buildUrl("/v1/scheduler/tasks"), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse<{ ok: boolean; task: SchedulerTask }>(response);
+}
+
+export async function schedulerUpdateTask(token: string, taskId: string, payload: Partial<SchedulerTaskPayload> & { enabled?: boolean }) {
+  const response = await fetch(buildUrl(`/v1/scheduler/tasks/${encodeURIComponent(taskId)}`), {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse<{ ok: boolean; task: SchedulerTask }>(response);
+}
+
+export async function schedulerDeleteTask(token: string, taskId: string) {
+  const response = await fetch(buildUrl(`/v1/scheduler/tasks/${encodeURIComponent(taskId)}`), {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseJsonResponse<{ ok: boolean }>(response);
+}
+
+export async function schedulerRunTask(token: string, taskId: string) {
+  const response = await fetch(buildUrl(`/v1/scheduler/tasks/${encodeURIComponent(taskId)}/run`), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return parseJsonResponse<{ ok: boolean; pdf_path: string; filename: string; debug?: unknown }>(response);
+}
+
+export async function schedulerGetSmtp(token: string) {
+  const response = await fetch(buildUrl("/v1/scheduler/smtp"), {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseJsonResponse<{ item: SmtpConfigPayload }>(response);
+}
+
+export async function schedulerPutSmtp(token: string, payload: SmtpConfigPayload) {
+  const response = await fetch(buildUrl("/v1/scheduler/smtp"), {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse<{ ok: boolean; item: SmtpConfigPayload }>(response);
+}
+
+export async function schedulerTestSmtp(token: string, recipient: string) {
+  const response = await fetch(buildUrl("/v1/scheduler/smtp/test"), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ recipient }),
+  });
+  return parseJsonResponse<{ ok: boolean; detail: string }>(response);
 }
 
 export async function adminListTenants(token: string) {

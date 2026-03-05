@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -45,3 +45,65 @@ class TenantUpsertRequest(BaseModel):
 
 class RoleUpsertRequest(BaseModel):
     role: str = Field(min_length=1)
+
+
+class SchedulerTaskBase(BaseModel):
+    name: Optional[str] = None
+    tenant_alias: str = Field(min_length=1, alias="tenant")
+    client: str = Field(min_length=1)
+    site: str = Field(min_length=1)
+    serial: Optional[str] = None
+    device: str = Field(min_length=1)
+    extra_devices: List[str] = Field(default_factory=list)
+    frequency: Literal["daily", "weekly", "monthly", "cron"] = "daily"
+    time: str = Field(pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
+    weekday: Optional[int] = Field(default=None, ge=0, le=6)
+    cron: Optional[str] = None
+    report_range_mode: Optional[str] = None
+    range_flux: Optional[str] = None
+    start_dt: Optional[datetime] = None
+    end_dt: Optional[datetime] = None
+    emails: List[str] = Field(min_length=1)
+    enabled: bool = True
+
+
+class SchedulerTaskCreateRequest(SchedulerTaskBase):
+    pass
+
+
+class SchedulerTaskUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    tenant_alias: Optional[str] = Field(default=None, alias="tenant")
+    client: Optional[str] = None
+    site: Optional[str] = None
+    serial: Optional[str] = None
+    device: Optional[str] = None
+    extra_devices: Optional[List[str]] = None
+    frequency: Optional[Literal["daily", "weekly", "monthly", "cron"]] = None
+    time: Optional[str] = Field(default=None, pattern=r"^([01]\d|2[0-3]):([0-5]\d)$")
+    weekday: Optional[int] = Field(default=None, ge=0, le=6)
+    cron: Optional[str] = None
+    report_range_mode: Optional[str] = None
+    range_flux: Optional[str] = None
+    start_dt: Optional[datetime] = None
+    end_dt: Optional[datetime] = None
+    emails: Optional[List[str]] = None
+    enabled: Optional[bool] = None
+
+
+class SchedulerRunRequest(BaseModel):
+    debug: bool = False
+    debug_sample_n: int = Field(default=10, ge=1, le=50)
+    max_workers: int = Field(default=4, ge=1, le=16)
+    force_recalculate: bool = False
+
+
+class SmtpConfigRequest(BaseModel):
+    server: str = Field(min_length=1)
+    port: int = Field(ge=1, le=65535)
+    user: str = Field(min_length=1)
+    password: str = ""
+
+
+class SmtpTestRequest(BaseModel):
+    recipient: str = Field(min_length=3)

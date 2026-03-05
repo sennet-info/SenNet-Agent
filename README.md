@@ -135,3 +135,66 @@ Smoke test API:
 ```bash
 python scripts/smoke_test_api.py --base-url http://127.0.0.1:8000 --tenant <tenant> --admin-token "$AGENT_ADMIN_TOKEN"
 ```
+
+## Scheduler API (`/v1/scheduler/*`)
+
+Persistencia (fuente de verdad compartida con Streamlit/cron):
+
+- `SCHEDULED_TASKS_PATH` (default `/opt/sennet-agent/scheduled_tasks.json`)
+- `SMTP_CONFIG_PATH` (default `/opt/sennet-agent/smtp_config.json`)
+
+Los endpoints de escritura (`POST/PUT/DELETE/run` y SMTP `PUT/test`) requieren `Authorization: Bearer $AGENT_ADMIN_TOKEN`.
+
+- `GET /v1/scheduler/tasks`: lista tareas (sin secretos).
+- `POST /v1/scheduler/tasks`: crea tarea.
+- `PUT /v1/scheduler/tasks/{task_id}`: actualiza o habilita/deshabilita.
+- `DELETE /v1/scheduler/tasks/{task_id}`: elimina tarea.
+- `POST /v1/scheduler/tasks/{task_id}/run`: ejecuta tarea oneshot.
+- `GET /v1/scheduler/smtp`: devuelve SMTP con password enmascarado.
+- `PUT /v1/scheduler/smtp`: guarda SMTP (`password` vacío mantiene el actual).
+- `POST /v1/scheduler/smtp/test`: correo de prueba.
+
+### Curl de ejemplo (scheduler)
+
+```bash
+curl -s http://127.0.0.1:8000/v1/scheduler/tasks \
+  -H "Authorization: Bearer $AGENT_ADMIN_TOKEN"
+```
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/v1/scheduler/tasks \
+  -H "Authorization: Bearer $AGENT_ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{
+    "tenant":"<tenant>",
+    "client":"<client>",
+    "site":"<site>",
+    "device":"<device>",
+    "frequency":"daily",
+    "time":"08:30",
+    "report_range_mode":"last_7_days",
+    "emails":["ops@example.com"]
+  }'
+```
+
+```bash
+curl -s -X PUT http://127.0.0.1:8000/v1/scheduler/smtp \
+  -H "Authorization: Bearer $AGENT_ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"server":"smtp.mail.com","port":587,"user":"bot@mail.com","password":""}'
+```
+
+Smoke test scheduler:
+
+```bash
+python scripts/smoke_test_scheduler_api.py \
+  --base-url http://127.0.0.1:8000 \
+  --admin-token "$AGENT_ADMIN_TOKEN" \
+  --tenant <tenant> --client <client> --site <site> --device <device> --email test@example.com
+```
+
+### Rollback sin romper Streamlit
+
+1. Mantener `scheduled_tasks.json` y `smtp_config.json` en `/opt/sennet-agent/`.
+2. Si desactivas el portal o API nueva, Streamlit + cron siguen leyendo los mismos JSON.
+3. Revertir deployment de portal/API no requiere migración de datos.
