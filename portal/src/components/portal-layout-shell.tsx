@@ -2,11 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, BellRing, Cable, CalendarClock, Factory, FileText } from "lucide-react";
+import { BarChart3, BellRing, Cable, CalendarClock, Factory, FileText, Home } from "lucide-react";
 
 import { SidebarProvider, useSidebar } from "@/components/sidebar-context";
 
 const navItems = [
+  {
+    name: "Inicio",
+    href: "/",
+    icon: Home,
+  },
   {
     name: "Dashboards",
     href: "/dashboards",
@@ -39,9 +44,22 @@ const navItems = [
   },
 ];
 
+const sectionLabels: Record<string, string> = {
+  dashboards: "Dashboards",
+  informes: "Informes",
+  conexiones: "Conexiones",
+  inventario: "Inventario",
+  alertas: "Alertas",
+  programador: "Programador",
+};
+
 function ShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { sidebarHidden } = useSidebar();
+  const isHome = pathname === "/";
+  const currentSection = isHome
+    ? "Inicio"
+    : sectionLabels[pathname.split("/").filter(Boolean)[0] ?? ""] ?? "Sección";
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -55,7 +73,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
 
             <nav className="space-y-2">
               {navItems.map(({ name, href, icon: Icon }) => {
-                const isActive = pathname === href || pathname?.startsWith(`${href}`);
+                const isActive = href === "/" ? pathname === "/" : pathname === href || pathname?.startsWith(`${href}/`);
 
                 return (
                   <Link
@@ -76,7 +94,24 @@ function ShellContent({ children }: { children: React.ReactNode }) {
           </aside>
         )}
 
-        <main className={`min-h-screen flex-1 ${sidebarHidden ? "p-3 md:p-4" : "p-6 md:p-8"}`}>{children}</main>
+        <main className={`min-h-screen flex-1 ${sidebarHidden ? "p-3 md:p-4" : "p-6 md:p-8"}`}>
+          <header className="mb-6 flex items-center justify-between border-b border-slate-800 pb-3 text-sm">
+            <p className="text-slate-400">
+              <span className="text-slate-500">Inicio</span>
+              <span className="px-2 text-slate-600">/</span>
+              <span className="text-slate-200">{currentSection}</span>
+            </p>
+            {!isHome && (
+              <Link
+                href="/"
+                className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-200 transition hover:border-slate-500 hover:bg-slate-900"
+              >
+                Volver a inicio
+              </Link>
+            )}
+          </header>
+          {children}
+        </main>
       </div>
     </div>
   );
