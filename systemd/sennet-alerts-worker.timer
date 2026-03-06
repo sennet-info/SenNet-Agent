@@ -1,0 +1,10 @@
+[Unit]
+Description=Run SenNet alerts worker every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+Unit=sennet-alerts-worker.service
+
+[Install]
+WantedBy=timers.target
