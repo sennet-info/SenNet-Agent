@@ -1,4 +1,4 @@
-export const ALERT_RULE_TYPES = ["heartbeat", "threshold", "missing_field", "irregular_interval", "daily_sum", "battery_low", "battery_low_all"] as const;
+export const ALERT_RULE_TYPES = ["heartbeat", "threshold", "missing_field", "irregular_interval", "daily_sum", "battery_low", "battery_low_any", "battery_low_all"] as const;
 export type AlertRuleType = (typeof ALERT_RULE_TYPES)[number];
 
 export const ALERT_SEVERITIES = ["info", "warn", "critical"] as const;
@@ -11,8 +11,15 @@ export type AlertScope = {
   tenant: string;
   client?: string;
   site?: string;
-  serial?: string;
-  device?: string;
+  serials?: string[];
+  deviceIds?: string[];
+  role?: AlertRole;
+  mode: "per_device" | "grouped";
+};
+
+export type AlertRecipientGroups = {
+  client: string[];
+  maintenance: string[];
 };
 
 export type AlertRule = {
@@ -29,6 +36,7 @@ export type AlertRule = {
   weekdays?: number[];
   notifications: {
     emails: string[];
+    groups?: AlertRecipientGroups;
     webhookUrl?: string;
     triggerMode: "edge" | "level";
     cooldownMinutes: number;
@@ -47,6 +55,7 @@ export type AlertEvent = {
   ruleId: string;
   ruleName: string;
   scope: AlertScope;
+  affected: Array<{ serial?: string; deviceId?: string; label?: string }>;
   message: string;
   details?: string;
   debug?: Record<string, unknown>;
