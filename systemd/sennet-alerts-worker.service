@@ -1,0 +1,11 @@
+[Unit]
+Description=SenNet Portal Alerts Worker (manual run)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/sennet-agent/repo
+Environment=SENNET_PORTAL_BASE=http://127.0.0.1:3000
+# Define in drop-in: Environment=SENNET_ADMIN_TOKEN=<admin_token>
+ExecStart=/opt/sennet-agent/venv/bin/python /opt/sennet-agent/repo/scripts/run_alerts_worker.py
