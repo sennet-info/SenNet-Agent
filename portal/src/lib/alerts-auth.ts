@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 
-const AGENT_BASE_URL = process.env.AGENT_BASE_URL ?? "http://127.0.0.1:8501";
+const AGENT_BASE_URL = process.env.AGENT_BASE_URL ?? "http://127.0.0.1:8000";
 
 export async function requireAdminToken(request: NextRequest) {
   const auth = request.headers.get("authorization") ?? "";
