@@ -32,6 +32,7 @@ from agent_api.schemas import (
     TenantUpsertRequest,
 )
 from agent_api.scheduler_store import list_tasks, mask_smtp, save_tasks, smtp_store
+from agent_api.report_time import resolve_report_time
 
 if str(APP_DIR) not in sys.path:
     sys.path.append(str(APP_DIR))
@@ -114,6 +115,7 @@ async def create_report(payload: ReportRequest):
         raise HTTPException(status_code=422, detail=f"devices excede el máximo permitido ({MAX_DEVICES})")
 
     auth_config = _tenant_auth_or_404(payload.tenant)
+    resolved_time = resolve_report_time(payload)
 
     async def _build():
         return await asyncio.to_thread(
@@ -122,17 +124,19 @@ async def create_report(payload: ReportRequest):
             payload.client,
             payload.site,
             payload.devices,
-            payload.range_flux,
+            resolved_time.range_flux,
             payload.price,
             payload.serial,
-            payload.start_dt,
-            payload.end_dt,
+            resolved_time.start_dt,
+            resolved_time.end_dt,
             False,
             None,
             payload.max_workers,
             payload.debug,
             payload.debug_sample_n,
             payload.force_recalculate,
+            resolved_time.range_mode,
+            resolved_time.range_label,
         )
 
     original_cwd = Path.cwd()
@@ -162,6 +166,18 @@ async def create_report(payload: ReportRequest):
     if payload.debug and debug_payload is not None:
         enriched_debug = {
             **debug_payload,
+            "resolved_range": {
+                **debug_payload.get("resolved_range", {}),
+                "user_mode": payload.range_mode,
+                "range_mode": resolved_time.range_mode,
+                "range_label": resolved_time.range_label,
+                "start": resolved_time.start_dt.isoformat(),
+                "stop": resolved_time.end_dt.isoformat(),
+                "range_flux": resolved_time.range_flux,
+                "timezone": resolved_time.timezone,
+                "criteria": resolved_time.criteria,
+                "adjusted": resolved_time.adjusted,
+            },
             "inputs": {
                 **debug_payload.get("inputs", {}),
                 "tenant": payload.tenant,
@@ -169,9 +185,13 @@ async def create_report(payload: ReportRequest):
                 "site": payload.site,
                 "serial": payload.serial,
                 "devices": payload.devices,
-                "range_flux": payload.range_flux,
-                "start_dt": payload.start_dt.isoformat() if payload.start_dt else None,
-                "end_dt": payload.end_dt.isoformat() if payload.end_dt else None,
+                "range_mode": payload.range_mode,
+                "last_days": payload.last_days,
+                "range_label": payload.range_label,
+                "timezone": payload.timezone,
+                "range_flux": resolved_time.range_flux,
+                "start_dt": resolved_time.start_dt.isoformat(),
+                "end_dt": resolved_time.end_dt.isoformat(),
                 "price": payload.price,
                 "max_workers": payload.max_workers,
                 "force_recalculate": payload.force_recalculate,

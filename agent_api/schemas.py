@@ -19,6 +19,10 @@ class ReportRequest(BaseModel):
     site: str
     devices: List[str] = Field(min_length=1, max_length=50)
     range_flux: str = "7d"
+    range_mode: Optional[Literal["last_n_days", "month_to_date", "previous_full_month", "custom", "last_days", "full_month"]] = None
+    last_days: Optional[int] = Field(default=None, ge=1, le=365)
+    range_label: Optional[str] = None
+    timezone: Optional[str] = None
     price: float = 0.14
     serial: Optional[str] = None
     start_dt: Optional[datetime] = None
