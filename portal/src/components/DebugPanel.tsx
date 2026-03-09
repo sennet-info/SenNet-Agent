@@ -179,6 +179,11 @@ export default function DebugPanel({ debugPayload, isLoading = false, debugPath 
         </div>
       </details>
 
+
+      <details>
+        <summary className="cursor-pointer font-medium">H) Cobertura temporal</summary>
+        <pre className="mt-2 overflow-auto rounded bg-slate-900 p-3 text-xs">{JSON.stringify((sanitized as Record<string, unknown>).coverage ?? {}, null, 2)}</pre>
+      </details>
       <details>
         <summary className="cursor-pointer font-medium">G) Warnings</summary>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">

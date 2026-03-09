@@ -55,6 +55,8 @@ def generate_report_pdf(
     collect_debug=False,
     debug_sample_n=10,
     force_recalculate=False,
+    range_mode=None,
+    range_label=None,
 ):
     total_started = time.perf_counter()
     discovery_started = time.perf_counter()
@@ -79,7 +81,8 @@ def generate_report_pdf(
     output_dir = os.path.abspath("output")
     os.makedirs(output_dir, exist_ok=True)
 
-    periods = [{"range_flux": range_flux, "section": f"{site} (V51)"}]
+    section_title = f"{site} - {range_label}" if range_label else f"{site} (V51)"
+    periods = [{"range_flux": range_flux, "section": section_title}]
     if start_dt and end_dt:
         monthly_periods = split_range_by_month(start_dt, end_dt)
         if len(monthly_periods) > 1:
@@ -288,6 +291,14 @@ def generate_report_pdf(
             snippet = "\n".join(snippet_lines)
             snippet = snippet.encode("utf-8")[:2048].decode("utf-8", errors="ignore")
             total_points = sum(item["points"] for item in stats_by_series.values())
+            all_first = [item.get("first_ts") for item in stats_by_series.values() if item.get("first_ts")]
+            all_last = [item.get("last_ts") for item in stats_by_series.values() if item.get("last_ts")]
+            coverage_start = min(all_first) if all_first else None
+            coverage_end = max(all_last) if all_last else None
+            if resolved_start and coverage_start and coverage_start > resolved_start:
+                warnings.append("La cobertura real empieza después del inicio solicitado")
+            if resolved_end and coverage_end and coverage_end < resolved_end:
+                warnings.append("La cobertura real termina antes del fin solicitado")
             debug_payload = {
                 "inputs": {
                     "client": client,
@@ -300,9 +311,17 @@ def generate_report_pdf(
                     "force_recalculate": force_recalculate,
                 },
                 "resolved_range": {
+                    "range_mode": range_mode,
+                    "range_label": range_label,
                     "start": resolved_start,
                     "stop": resolved_end,
+                    "range_flux": range_flux,
                     "timezone": str(tz_value) if tz_value else "UTC",
+                },
+                "coverage": {
+                    "data_start": coverage_start,
+                    "data_end": coverage_end,
+                    "matches_request": bool(coverage_start and coverage_end and resolved_start and resolved_end and coverage_start <= resolved_start and coverage_end >= resolved_end),
                 },
                 "query_proof": {
                     "sha256": hashlib.sha256(query_text.encode("utf-8")).hexdigest() if query_text else None,

@@ -15,14 +15,7 @@ import {
   ReportResult,
 } from "@/lib/agent-api-client";
 import { DebugPayload } from "@/lib/agent-types";
-
-function toIsoAtStart(dateValue: string) {
-  return `${dateValue}T00:00:00`;
-}
-
-function toIsoAtEnd(dateValue: string) {
-  return `${dateValue}T23:59:59`;
-}
+import { ReportRangeMode, resolveReportRange } from "@/lib/report-time";
 
 const STORAGE_KEY = "informes_form_state_v1";
 
@@ -50,7 +43,7 @@ export default function InformesPage() {
   const [serial, setSerial] = useState("");
   const [devices, setDevices] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [rangeMode, setRangeMode] = useState("last_days");
+  const [rangeMode, setRangeMode] = useState<ReportRangeMode>("last_n_days");
   const [lastDays, setLastDays] = useState(7);
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -213,7 +206,13 @@ export default function InformesPage() {
 
   useEffect(() => {
     if (!storedState) return;
-    if (storedState.rangeMode) setRangeMode(storedState.rangeMode);
+    if (storedState.rangeMode) {
+      const aliases: Record<string, ReportRangeMode> = { last_days: "last_n_days", full_month: "month_to_date" };
+      const nextMode = aliases[storedState.rangeMode] ?? storedState.rangeMode;
+      if (["last_n_days", "month_to_date", "previous_full_month", "custom"].includes(nextMode)) {
+        setRangeMode(nextMode as ReportRangeMode);
+      }
+    }
     if (typeof storedState.lastDays === "number") setLastDays(storedState.lastDays);
     if (storedState.customStart) setCustomStart(storedState.customStart);
     if (storedState.customEnd) setCustomEnd(storedState.customEnd);
@@ -240,17 +239,25 @@ export default function InformesPage() {
   }, [tenant, client, site, serial, selected, rangeMode, lastDays, customStart, customEnd, debug, storedState]);
 
   const rangePayload = useMemo(() => {
-    if (rangeMode === "last_days") {
-      return { range_flux: `${lastDays}d` };
+    try {
+      const resolved = resolveReportRange({
+        mode: rangeMode,
+        lastDays,
+        customStart,
+        customEnd,
+      });
+      return {
+        range_mode: resolved.range_mode,
+        last_days: resolved.criteria.days as number | undefined,
+        range_label: resolved.range_label,
+        timezone: resolved.timezone,
+        range_flux: resolved.range_flux,
+        start_dt: resolved.start_dt,
+        end_dt: resolved.end_dt,
+      };
+    } catch {
+      return null;
     }
-    if (rangeMode === "full_month") {
-      return { range_flux: "month" };
-    }
-    return {
-      range_flux: "custom",
-      start_dt: customStart ? toIsoAtStart(customStart) : undefined,
-      end_dt: customEnd ? toIsoAtEnd(customEnd) : undefined,
-    };
   }, [rangeMode, lastDays, customStart, customEnd]);
 
   async function loadDebugPayload(report: ReportResult) {
@@ -281,6 +288,7 @@ export default function InformesPage() {
     setResult(null);
     setDebugPayload(null);
     try {
+      if (!rangePayload) throw new Error("Rango temporal inválido");
       const report = await createReport({
         tenant,
         client,
@@ -374,15 +382,17 @@ export default function InformesPage() {
       </div>
 
       <div className="grid gap-2 md:grid-cols-4">
-        <select value={rangeMode} onChange={(event) => setRangeMode(event.target.value)} className="rounded border border-slate-700 bg-slate-950 p-2">
-          <option value="last_days">Últimos días</option>
-          <option value="full_month">Mes completo</option>
+        <select value={rangeMode} onChange={(event) => setRangeMode(event.target.value as ReportRangeMode)} className="rounded border border-slate-700 bg-slate-950 p-2">
+          <option value="last_n_days">Últimos N días</option>
+          <option value="month_to_date">Mes en curso</option>
+          <option value="previous_full_month">Último mes cerrado</option>
           <option value="custom">Personalizado</option>
         </select>
-        <input type="number" value={lastDays} onChange={(event) => setLastDays(Number(event.target.value))} disabled={rangeMode !== "last_days"} className="rounded border border-slate-700 bg-slate-950 p-2" />
+        <input type="number" min={1} value={lastDays} onChange={(event) => setLastDays(Number(event.target.value))} disabled={rangeMode !== "last_n_days"} className="rounded border border-slate-700 bg-slate-950 p-2" />
         <input type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} disabled={rangeMode !== "custom"} className="rounded border border-slate-700 bg-slate-950 p-2" />
         <input type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} disabled={rangeMode !== "custom"} className="rounded border border-slate-700 bg-slate-950 p-2" />
       </div>
+      <p className="text-xs text-slate-400">{rangeMode === "last_n_days" ? "Se usará desde ahora menos N días hasta ahora." : rangeMode === "month_to_date" ? "Mes en curso: desde el día 1 a las 00:00 hasta este momento." : rangeMode === "previous_full_month" ? "Mes anterior completo: desde el día 1 00:00 hasta el último día 23:59:59." : "Se usará exactamente desde las 00:00 del inicio hasta las 23:59:59 del fin."}</p>
 
       <div className="grid gap-2 md:grid-cols-2">
         <input type="number" value={price} onChange={(event) => setPrice(Number(event.target.value))} className="rounded border border-slate-700 bg-slate-950 p-2" />

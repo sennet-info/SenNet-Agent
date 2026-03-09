@@ -13,6 +13,10 @@ export type ReportPayload = {
   serial?: string;
   devices: string[];
   range_flux: string;
+  range_mode?: "last_n_days" | "month_to_date" | "previous_full_month" | "custom" | "last_days" | "full_month";
+  last_days?: number;
+  range_label?: string;
+  timezone?: string;
   price: number;
   start_dt?: string;
   end_dt?: string;
