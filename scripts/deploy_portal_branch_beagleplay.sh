@@ -2,10 +2,12 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
+EXPECTED_REPO_DIR="/opt/sennet-agent/repo"
 RUNTIME_ROOT="/home/debian/sennet-portal"
 RUNTIME_PORTAL_DIR="$RUNTIME_ROOT/portal"
 REQUIRED_SERVICE="sennet-portal.service"
 HEALTHCHECK_URL="http://127.0.0.1:3000/alertas"
+STANDALONE_PATH="$RUNTIME_PORTAL_DIR/.next/standalone"
 
 log() {
   echo "[$SCRIPT_NAME] $*"
@@ -51,6 +53,11 @@ main() {
 
   local repo_dir
   repo_dir="$(git rev-parse --show-toplevel 2>/dev/null)" || die "This script must run inside a git repository"
+
+  if [ "$repo_dir" != "$EXPECTED_REPO_DIR" ]; then
+    die "Unexpected repository location: $repo_dir (expected $EXPECTED_REPO_DIR). Run this script from BeaglePlay working repo."
+  fi
+
   cd "$repo_dir"
 
   local portal_source_dir="$repo_dir/portal"
@@ -95,6 +102,8 @@ main() {
   log "Building standalone portal bundle"
   sudo -u debian -H bash -lc 'cd /home/debian/sennet-portal/portal && ./scripts/build_standalone.sh'
 
+  [ -d "$STANDALONE_PATH" ] || die "Standalone build output missing: $STANDALONE_PATH"
+
   log "Restarting $REQUIRED_SERVICE"
   sudo systemctl restart "$REQUIRED_SERVICE"
 
@@ -111,10 +120,10 @@ main() {
   [ -n "$proc_cmdline" ] || die "Unable to read cmdline for PID $main_pid"
 
   case "$proc_cmdline" in
-    *"/home/debian/sennet-portal/portal/.next/standalone"*)
+    *"$STANDALONE_PATH"*)
       ;;
     *)
-      die "Service PID $main_pid is not running from /home/debian/sennet-portal/portal/.next/standalone. Cmdline: $proc_cmdline"
+      die "Service PID $main_pid is not running from $STANDALONE_PATH. Cmdline: $proc_cmdline"
       ;;
   esac
 
