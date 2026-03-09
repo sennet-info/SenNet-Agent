@@ -8,6 +8,16 @@ export type TenantConfig = {
 
 export type PriceSource = "serial" | "site" | "client" | "tenant" | "fallback" | "manual_override";
 
+export type PricingDefaults = {
+  fallback: number;
+  scopes: {
+    serial: Record<string, number>;
+    site: Record<string, number>;
+    client: Record<string, number>;
+    tenant: Record<string, number>;
+  };
+};
+
 export type ReportPayload = {
   tenant: string;
   client: string;
@@ -126,7 +136,29 @@ export async function discoveryDevices(tenant: string, client: string, site: str
 
 export async function resolveDefaultPrice(tenant: string, client?: string, site?: string, serial?: string) {
   const response = await fetch(buildUrl("/v1/pricing/resolve", { tenant, client, site, serial }), { cache: "no-store" });
-  return parseJsonResponse<{ price: number; source: PriceSource; scope: { tenant: string; client?: string; site?: string; serial?: string } }>(response);
+  return parseJsonResponse<{
+    price: number;
+    source: PriceSource;
+    scope: { tenant: string; client?: string; site?: string; serial?: string };
+    matched_key?: string | null;
+  }>(response);
+}
+
+export async function adminGetPricingDefaults(token: string) {
+  const response = await fetch(buildUrl("/v1/pricing/defaults"), {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseJsonResponse<{ item: PricingDefaults }>(response);
+}
+
+export async function adminPutPricingDefaults(token: string, payload: PricingDefaults) {
+  const response = await fetch(buildUrl("/v1/pricing/defaults"), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse<{ ok: boolean; item: PricingDefaults }>(response);
 }
 
 export async function createReport(payload: ReportPayload) {

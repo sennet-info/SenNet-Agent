@@ -35,7 +35,7 @@ from agent_api.schemas import (
 )
 from agent_api.scheduler_store import list_tasks, mask_smtp, save_tasks, smtp_store
 from agent_api.report_time import resolve_report_time
-from agent_api.pricing import resolve_default_price
+from agent_api.pricing import get_pricing_config, resolve_default_price
 
 if str(APP_DIR) not in sys.path:
     sys.path.append(str(APP_DIR))
@@ -117,14 +117,30 @@ def pricing_resolve(
     site: Optional[str] = Query(default=None),
     serial: Optional[str] = Query(default=None),
 ):
-    price, source = resolve_default_price(tenant=tenant, client=client, site=site, serial=serial)
+    price, source, matched_key = resolve_default_price(tenant=tenant, client=client, site=site, serial=serial)
     return {
         "price": price,
         "source": source,
         "scope": {"tenant": tenant, "client": client, "site": site, "serial": serial},
+        "matched_key": matched_key,
     }
 
 
+@app.get("/v1/pricing/defaults", dependencies=[Depends(_require_admin_token)])
+def pricing_defaults_get():
+    return {"item": get_pricing_config()}
+
+
+@app.post("/v1/pricing/defaults", dependencies=[Depends(_require_admin_token)])
+def pricing_defaults_put(payload: dict = Body(...)):
+    fallback = payload.get("fallback")
+    scopes = payload.get("scopes")
+    if fallback is not None and not isinstance(fallback, (int, float)):
+        raise HTTPException(status_code=422, detail="fallback debe ser numérico")
+    if scopes is not None and not isinstance(scopes, dict):
+        raise HTTPException(status_code=422, detail="scopes debe ser un objeto")
+    save_energy_prices_config(payload)
+    return {"ok": True, "item": get_pricing_config()}
 
 
 @app.post("/v1/reports", response_model=ReportResponse)
@@ -134,7 +150,7 @@ async def create_report(payload: ReportRequest):
 
     auth_config = _tenant_auth_or_404(payload.tenant)
     resolved_time = resolve_report_time(payload)
-    default_price, default_source = resolve_default_price(
+    default_price, default_source, default_match_key = resolve_default_price(
         tenant=payload.tenant,
         client=payload.client,
         site=payload.site,
@@ -231,6 +247,7 @@ async def create_report(payload: ReportRequest):
                     "site": payload.site,
                     "serial": payload.serial,
                 },
+                "price_scope_matched_key": default_match_key,
             },
             "pricing": {
                 "price_effective": effective_price,
@@ -238,6 +255,13 @@ async def create_report(payload: ReportRequest):
                 "price_override": effective_override,
                 "price_default": default_price,
                 "price_default_source": default_source,
+                "price_scope": {
+                    "tenant": payload.tenant,
+                    "client": payload.client,
+                    "site": payload.site,
+                    "serial": payload.serial,
+                },
+                "price_scope_matched_key": default_match_key,
             },
         }
 
@@ -372,7 +396,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         range_flux = to_flux_range(start_dt, end_dt)
 
     auth_config = _tenant_auth_or_404(task["tenant_alias"])
-    effective_price, price_source = resolve_default_price(
+    effective_price, price_source, price_match_key = resolve_default_price(
         tenant=task.get("tenant_alias"),
         client=task.get("client"),
         site=task.get("site"),
@@ -433,6 +457,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
                 "site": task.get("site"),
                 "serial": task.get("serial"),
             },
+            "price_scope_matched_key": price_match_key,
         })
 
     return {"ok": True, "pdf_path": str(safe_path), "filename": safe_path.name, "debug": debug_payload}
