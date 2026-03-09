@@ -47,31 +47,34 @@ Se añadió el script:
 ### Uso
 
 ```bash
-scripts/deploy_portal_branch_beagleplay.sh <rama>
+/opt/sennet-agent/repo/scripts/deploy_portal_branch_beagleplay.sh <rama>
 ```
 
 Ejemplo:
 
 ```bash
-scripts/deploy_portal_branch_beagleplay.sh feat/alertas-fix
+cd /opt/sennet-agent/repo
+./scripts/deploy_portal_branch_beagleplay.sh feat/alertas-fix
 ```
 
 ### Qué hace el script
 
 1. Valida dependencias (`git`, `rsync`, `systemctl`, `curl`).
-2. Ejecuta:
+2. Valida que se ejecuta desde el repo esperado en BeaglePlay: `/opt/sennet-agent/repo`.
+3. Ejecuta:
    - `git fetch origin --prune`
    - `git checkout <rama>` (crea rama local si no existe)
    - `git reset --hard origin/<rama>`
-3. Para `sennet-portal.service`.
-4. Sincroniza `portal/` hacia `/home/debian/sennet-portal/portal` con `rsync -a --delete`.
-5. Ejecuta `./scripts/build_standalone.sh` como usuario `debian`.
-6. Reinicia `sennet-portal.service`.
-7. Verifica:
+4. Para `sennet-portal.service`.
+5. Sincroniza `portal/` hacia `/home/debian/sennet-portal/portal` con `rsync -a --delete`.
+6. Ejecuta `./scripts/build_standalone.sh` como usuario `debian`.
+7. Verifica que exista `/home/debian/sennet-portal/portal/.next/standalone`.
+8. Reinicia `sennet-portal.service`.
+9. Verifica:
    - servicio activo
    - `MainPID` con `cmdline` conteniendo `/home/debian/sennet-portal/portal/.next/standalone`
    - `curl` a `/alertas` con HTTP válido (200 o redirecciones 30x)
-8. Muestra mensajes de error claros y aborta ante cualquier fallo (`set -euo pipefail`).
+10. Muestra mensajes de error claros y aborta ante cualquier fallo (`set -euo pipefail`).
 
 ---
 

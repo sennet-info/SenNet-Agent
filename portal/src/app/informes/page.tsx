@@ -18,6 +18,11 @@ import { DebugPayload } from "@/lib/agent-types";
 import { ReportRangeMode, resolveReportRange } from "@/lib/report-time";
 
 const STORAGE_KEY = "informes_form_state_v1";
+const DEFAULT_MAX_WORKERS = 1;
+
+function getDefaultMaxWorkers() {
+  return DEFAULT_MAX_WORKERS;
+}
 
 type StoredFormState = {
   tenant?: string;
@@ -48,9 +53,10 @@ export default function InformesPage() {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [price, setPrice] = useState(0.14);
-  const [workers] = useState(1);
+  const [maxWorkers] = useState(() => getDefaultMaxWorkers());
   const [forceRecalculate] = useState(false);
   const [debug, setDebug] = useState(false);
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingClients, setLoadingClients] = useState(false);
   const [loadingSites, setLoadingSites] = useState(false);
@@ -296,7 +302,7 @@ export default function InformesPage() {
         serial: serial || undefined,
         devices: selected,
         price,
-        max_workers: workers,
+        max_workers: maxWorkers,
         force_recalculate: forceRecalculate,
         debug,
         ...rangePayload,
@@ -394,20 +400,34 @@ export default function InformesPage() {
       </div>
       <p className="text-xs text-slate-400">{rangeMode === "last_n_days" ? "Se usará desde ahora menos N días hasta ahora." : rangeMode === "month_to_date" ? "Mes en curso: desde el día 1 a las 00:00 hasta este momento." : rangeMode === "previous_full_month" ? "Mes anterior completo: desde el día 1 00:00 hasta el último día 23:59:59." : "Se usará exactamente desde las 00:00 del inicio hasta las 23:59:59 del fin."}</p>
 
-      <div className="grid gap-2 md:grid-cols-2">
+      <div className="grid gap-2 md:grid-cols-1">
         <input type="number" value={price} onChange={(event) => setPrice(Number(event.target.value))} className="rounded border border-slate-700 bg-slate-950 p-2" />
-        <input type="number" value={workers} disabled className="rounded border border-slate-700 bg-slate-950 p-2 opacity-60" />
+      </div>
+
+      <div className="rounded border border-slate-800 p-3">
+        <button
+          className="text-sm text-slate-300 underline-offset-2 hover:text-white hover:underline"
+          onClick={() => setShowAdvancedOptions((prev) => !prev)}
+          type="button"
+        >
+          {showAdvancedOptions ? "Ocultar opciones avanzadas" : "Mostrar opciones avanzadas"}
+        </button>
+
+        {showAdvancedOptions && (
+          <div className="mt-3 grid gap-3">
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={debug} onChange={(event) => setDebug(event.target.checked)} />
+              Debug
+            </label>
+            <p className="text-xs text-slate-400">Los parámetros técnicos de procesamiento se gestionan automáticamente para mantener una experiencia simple.</p>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
         <button className="rounded bg-emerald-700 px-4 py-2" disabled={loading || selected.length === 0} onClick={generateReport} type="button">
           {loading ? "Generando..." : "Generar"}
         </button>
-
-        <label className="inline-flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={debug} onChange={(event) => setDebug(event.target.checked)} />
-          Debug
-        </label>
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
