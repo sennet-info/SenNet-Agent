@@ -6,6 +6,8 @@ export type TenantConfig = {
   bucket: string;
 };
 
+export type PriceSource = "serial" | "site" | "client" | "tenant" | "fallback" | "manual_override";
+
 export type ReportPayload = {
   tenant: string;
   client: string;
@@ -18,6 +20,8 @@ export type ReportPayload = {
   range_label?: string;
   timezone?: string;
   price: number;
+  price_source?: PriceSource;
+  price_override?: boolean;
   start_dt?: string;
   end_dt?: string;
   debug?: boolean;
@@ -117,6 +121,12 @@ export async function discoveryDevices(tenant: string, client: string, site: str
     cache: "no-store",
   });
   return parseJsonResponse<{ items: string[] }>(response);
+}
+
+
+export async function resolveDefaultPrice(tenant: string, client?: string, site?: string, serial?: string) {
+  const response = await fetch(buildUrl("/v1/pricing/resolve", { tenant, client, site, serial }), { cache: "no-store" });
+  return parseJsonResponse<{ price: number; source: PriceSource; scope: { tenant: string; client?: string; site?: string; serial?: string } }>(response);
 }
 
 export async function createReport(payload: ReportPayload) {

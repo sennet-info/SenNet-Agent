@@ -13,9 +13,11 @@ from agent_api.config import (
     APP_DIR,
     TenantNotFoundError,
     get_tenant_auth,
+    load_energy_prices_config,
     load_roles_config,
     load_tenants_config,
     safe_output_path,
+    save_energy_prices_config,
     save_roles_config,
     save_tenants_config,
 )
@@ -33,6 +35,7 @@ from agent_api.schemas import (
 )
 from agent_api.scheduler_store import list_tasks, mask_smtp, save_tasks, smtp_store
 from agent_api.report_time import resolve_report_time
+from agent_api.pricing import resolve_default_price
 
 if str(APP_DIR) not in sys.path:
     sys.path.append(str(APP_DIR))
@@ -107,6 +110,21 @@ def discovery_devices(
     serial: Optional[str] = Query(default=None),
 ):
     return {"items": list_devices(_tenant_auth_or_404(tenant), client, site, serial=serial)}
+@app.get("/v1/pricing/resolve")
+def pricing_resolve(
+    tenant: str = Query(...),
+    client: Optional[str] = Query(default=None),
+    site: Optional[str] = Query(default=None),
+    serial: Optional[str] = Query(default=None),
+):
+    price, source = resolve_default_price(tenant=tenant, client=client, site=site, serial=serial)
+    return {
+        "price": price,
+        "source": source,
+        "scope": {"tenant": tenant, "client": client, "site": site, "serial": serial},
+    }
+
+
 
 
 @app.post("/v1/reports", response_model=ReportResponse)
@@ -116,6 +134,15 @@ async def create_report(payload: ReportRequest):
 
     auth_config = _tenant_auth_or_404(payload.tenant)
     resolved_time = resolve_report_time(payload)
+    default_price, default_source = resolve_default_price(
+        tenant=payload.tenant,
+        client=payload.client,
+        site=payload.site,
+        serial=payload.serial,
+    )
+    effective_price = payload.price
+    effective_source = payload.price_source or default_source
+    effective_override = payload.price_override if payload.price_override is not None else abs(effective_price - default_price) > 1e-9
 
     async def _build():
         return await asyncio.to_thread(
@@ -125,7 +152,7 @@ async def create_report(payload: ReportRequest):
             payload.site,
             payload.devices,
             resolved_time.range_flux,
-            payload.price,
+            effective_price,
             payload.serial,
             resolved_time.start_dt,
             resolved_time.end_dt,
@@ -192,9 +219,25 @@ async def create_report(payload: ReportRequest):
                 "range_flux": resolved_time.range_flux,
                 "start_dt": resolved_time.start_dt.isoformat(),
                 "end_dt": resolved_time.end_dt.isoformat(),
-                "price": payload.price,
+                "price": effective_price,
                 "max_workers": payload.max_workers,
                 "force_recalculate": payload.force_recalculate,
+                "price_effective": effective_price,
+                "price_source": effective_source,
+                "price_override": effective_override,
+                "price_scope": {
+                    "tenant": payload.tenant,
+                    "client": payload.client,
+                    "site": payload.site,
+                    "serial": payload.serial,
+                },
+            },
+            "pricing": {
+                "price_effective": effective_price,
+                "price_source": effective_source,
+                "price_override": effective_override,
+                "price_default": default_price,
+                "price_default_source": default_source,
             },
         }
 
@@ -329,6 +372,12 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         range_flux = to_flux_range(start_dt, end_dt)
 
     auth_config = _tenant_auth_or_404(task["tenant_alias"])
+    effective_price, price_source = resolve_default_price(
+        tenant=task.get("tenant_alias"),
+        client=task.get("client"),
+        site=task.get("site"),
+        serial=task.get("serial"),
+    )
 
     async def _build():
         return await asyncio.to_thread(
@@ -338,7 +387,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
             task["site"],
             devices,
             range_flux,
-            0.14,
+            effective_price,
             task.get("serial"),
             start_dt,
             end_dt,
@@ -371,6 +420,20 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     safe_path = safe_output_path(pdf_path)
     if not safe_path.exists():
         raise HTTPException(status_code=500, detail="PDF generado no encontrado en disco")
+
+    if isinstance(debug_payload, dict):
+        debug_payload.setdefault("pricing", {})
+        debug_payload["pricing"].update({
+            "price_effective": effective_price,
+            "price_source": price_source,
+            "price_override": False,
+            "price_scope": {
+                "tenant": task.get("tenant_alias"),
+                "client": task.get("client"),
+                "site": task.get("site"),
+                "serial": task.get("serial"),
+            },
+        })
 
     return {"ok": True, "pdf_path": str(safe_path), "filename": safe_path.name, "debug": debug_payload}
 
@@ -435,6 +498,22 @@ def admin_delete_tenant(alias: str):
     removed = tenants.pop(alias)
     save_tenants_config(tenants)
     return {"ok": True, "alias": alias, "tenant": removed}
+
+
+
+
+@app.get("/v1/admin/energy-prices", dependencies=[Depends(_require_admin_token)])
+def admin_get_energy_prices():
+    cfg = load_energy_prices_config()
+    return {"item": cfg if isinstance(cfg, dict) else {}}
+
+
+@app.put("/v1/admin/energy-prices", dependencies=[Depends(_require_admin_token)])
+def admin_put_energy_prices(payload: dict = Body(default={})):
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Payload inválido")
+    save_energy_prices_config(payload)
+    return {"ok": True, "item": payload}
 
 
 @app.get("/v1/admin/roles", dependencies=[Depends(_require_admin_token)])

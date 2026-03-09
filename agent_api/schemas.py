@@ -24,6 +24,8 @@ class ReportRequest(BaseModel):
     range_label: Optional[str] = None
     timezone: Optional[str] = None
     price: float = 0.14
+    price_source: Optional[str] = None
+    price_override: Optional[bool] = None
     serial: Optional[str] = None
     start_dt: Optional[datetime] = None
     end_dt: Optional[datetime] = None

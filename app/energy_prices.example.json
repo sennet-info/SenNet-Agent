@@ -1,0 +1,17 @@
+{
+  "fallback": 0.14,
+  "scopes": {
+    "tenant": {
+      "demo": 0.15
+    },
+    "client": {
+      "Cliente Norte": 0.135
+    },
+    "site": {
+      "Planta Madrid": 0.142
+    },
+    "serial": {
+      "SN-000123": 0.129
+    }
+  }
+}

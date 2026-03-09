@@ -6,12 +6,14 @@ import DebugPanel from "@/components/DebugPanel";
 import {
   adminListTenants,
   createReport,
+  resolveDefaultPrice,
   discoveryClients,
   discoveryDevices,
   discoverySerials,
   discoverySites,
   downloadDebugUrl,
   downloadUrl,
+  PriceSource,
   ReportResult,
 } from "@/lib/agent-api-client";
 import { DebugPayload } from "@/lib/agent-types";
@@ -19,6 +21,14 @@ import { ReportRangeMode, resolveReportRange } from "@/lib/report-time";
 
 const STORAGE_KEY = "informes_form_state_v1";
 const DEFAULT_MAX_WORKERS = 1;
+const PRICE_SOURCE_LABELS: Record<PriceSource, string> = {
+  serial: "tarifa de serial",
+  site: "tarifa de instalación",
+  client: "tarifa de cliente",
+  tenant: "tarifa general del tenant",
+  fallback: "fallback global",
+  manual_override: "tarifa manual para este informe",
+};
 
 function getDefaultMaxWorkers() {
   return DEFAULT_MAX_WORKERS;
@@ -52,7 +62,11 @@ export default function InformesPage() {
   const [lastDays, setLastDays] = useState(7);
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
-  const [price, setPrice] = useState(0.14);
+  const [resolvedPrice, setResolvedPrice] = useState(0.14);
+  const [resolvedPriceSource, setResolvedPriceSource] = useState<PriceSource>("fallback");
+  const [priceLoading, setPriceLoading] = useState(false);
+  const [priceOverride, setPriceOverride] = useState(false);
+  const [manualPrice, setManualPrice] = useState(0.14);
   const [maxWorkers] = useState(() => getDefaultMaxWorkers());
   const [forceRecalculate] = useState(false);
   const [debug, setDebug] = useState(false);
@@ -244,6 +258,34 @@ export default function InformesPage() {
     );
   }, [tenant, client, site, serial, selected, rangeMode, lastDays, customStart, customEnd, debug, storedState]);
 
+
+  useEffect(() => {
+    if (!tenant) return;
+    let cancelled = false;
+    setPriceLoading(true);
+    resolveDefaultPrice(tenant, client || undefined, site || undefined, serial || undefined)
+      .then((response) => {
+        if (cancelled) return;
+        setResolvedPrice(response.price);
+        setResolvedPriceSource(response.source);
+        if (!priceOverride) {
+          setManualPrice(response.price);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setResolvedPrice(0.14);
+        setResolvedPriceSource("fallback");
+      })
+      .finally(() => {
+        if (!cancelled) setPriceLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tenant, client, site, serial, priceOverride]);
+
   const rangePayload = useMemo(() => {
     try {
       const resolved = resolveReportRange({
@@ -301,7 +343,9 @@ export default function InformesPage() {
         site,
         serial: serial || undefined,
         devices: selected,
-        price,
+        price: priceOverride ? manualPrice : resolvedPrice,
+        price_source: priceOverride ? "manual_override" : resolvedPriceSource,
+        price_override: priceOverride,
         max_workers: maxWorkers,
         force_recalculate: forceRecalculate,
         debug,
@@ -400,8 +444,22 @@ export default function InformesPage() {
       </div>
       <p className="text-xs text-slate-400">{rangeMode === "last_n_days" ? "Se usará desde ahora menos N días hasta ahora." : rangeMode === "month_to_date" ? "Mes en curso: desde el día 1 a las 00:00 hasta este momento." : rangeMode === "previous_full_month" ? "Mes anterior completo: desde el día 1 00:00 hasta el último día 23:59:59." : "Se usará exactamente desde las 00:00 del inicio hasta las 23:59:59 del fin."}</p>
 
-      <div className="grid gap-2 md:grid-cols-1">
-        <input type="number" value={price} onChange={(event) => setPrice(Number(event.target.value))} className="rounded border border-slate-700 bg-slate-950 p-2" />
+      <div className="rounded border border-slate-800 p-4 space-y-2">
+        <p className="text-sm font-semibold">Tarifa energética</p>
+        <p className="text-sm text-slate-200">Precio aplicado al informe: <span className="font-semibold">{(priceOverride ? manualPrice : resolvedPrice).toFixed(3)} €/kWh</span></p>
+        <p className="text-xs text-slate-400">{priceLoading ? "Resolviendo tarifa por defecto..." : `Tarifa por defecto detectada: ${resolvedPrice.toFixed(3)} €/kWh · Origen: ${PRICE_SOURCE_LABELS[resolvedPriceSource]}`}</p>
+        <p className="text-xs text-slate-500">Este valor se aplicará a los medidores energéticos incluidos en el informe. Por defecto se usa la tarifa configurada para esta instalación o equipo. Puedes cambiarla solo para este informe si lo necesitas.</p>
+        <label className="inline-flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={priceOverride} onChange={(event) => {
+            const enabled = event.target.checked;
+            setPriceOverride(enabled);
+            if (!enabled) setManualPrice(resolvedPrice);
+          }} />
+          Usar otra tarifa para este informe
+        </label>
+        {priceOverride && (
+          <input type="number" min={0} step="0.001" value={manualPrice} onChange={(event) => setManualPrice(Number(event.target.value))} className="rounded border border-slate-700 bg-slate-950 p-2 max-w-xs" />
+        )}
       </div>
 
       <div className="rounded border border-slate-800 p-3">
