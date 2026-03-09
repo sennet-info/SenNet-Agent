@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import DebugPanel from "@/components/DebugPanel";
 import {
+  adminListRoles,
   adminListTenants,
   createReport,
   resolveDefaultPrice,
@@ -20,15 +21,28 @@ import { DebugPayload } from "@/lib/agent-types";
 import { ReportRangeMode, resolveReportRange } from "@/lib/report-time";
 
 const STORAGE_KEY = "informes_form_state_v1";
+const INITIAL_PRICE_FALLBACK = 0.14;
 const DEFAULT_MAX_WORKERS = 1;
 const PRICE_SOURCE_LABELS: Record<PriceSource, string> = {
-  serial: "tarifa de serial",
-  site: "tarifa de instalación",
-  client: "tarifa de cliente",
-  tenant: "tarifa general del tenant",
+  serial: "equipo (serial)",
+  site: "instalación",
+  client: "cliente",
+  tenant: "tenant",
   fallback: "fallback global",
   manual_override: "tarifa manual para este informe",
 };
+
+function formatPrice(price: number) {
+  return `${price.toFixed(3).replace(".", ",")} €/kWh`;
+}
+
+const ENERGY_ROLE_SET = new Set(["consumption", "generation", "storage"]);
+const ENERGY_DEVICE_HINTS = ["ENER", "KWH", "CONSUM", "GENERAL", "ACTIVA", "METER", "CONTADOR", "INV"]; 
+
+function deviceLooksEnergy(device: string) {
+  const normalized = device.toUpperCase();
+  return ENERGY_DEVICE_HINTS.some((hint) => normalized.includes(hint));
+}
 
 function getDefaultMaxWorkers() {
   return DEFAULT_MAX_WORKERS;
@@ -62,11 +76,12 @@ export default function InformesPage() {
   const [lastDays, setLastDays] = useState(7);
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
-  const [resolvedPrice, setResolvedPrice] = useState(0.14);
+  const [resolvedPrice, setResolvedPrice] = useState(INITIAL_PRICE_FALLBACK);
   const [resolvedPriceSource, setResolvedPriceSource] = useState<PriceSource>("fallback");
   const [priceLoading, setPriceLoading] = useState(false);
   const [priceOverride, setPriceOverride] = useState(false);
-  const [manualPrice, setManualPrice] = useState(0.14);
+  const [manualPrice, setManualPrice] = useState(INITIAL_PRICE_FALLBACK);
+  const [resolvedPriceKey, setResolvedPriceKey] = useState<string | null>(null);
   const [maxWorkers] = useState(() => getDefaultMaxWorkers());
   const [forceRecalculate] = useState(false);
   const [debug, setDebug] = useState(false);
@@ -80,6 +95,7 @@ export default function InformesPage() {
   const [debugPayload, setDebugPayload] = useState<DebugPayload | null>(null);
   const [loadingDebugPayload, setLoadingDebugPayload] = useState(false);
   const [storedState, setStoredState] = useState<StoredFormState | null>(null);
+  const [deviceRoles, setDeviceRoles] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const savedRaw = window.localStorage.getItem(STORAGE_KEY);
@@ -105,6 +121,7 @@ export default function InformesPage() {
   useEffect(() => {
     const token = window.localStorage.getItem("agent_admin_token") ?? "";
     if (!token) return;
+
     adminListTenants(token)
       .then((resp) => {
         const aliases = Object.keys(resp.items);
@@ -114,6 +131,14 @@ export default function InformesPage() {
         if (nextTenant) setTenant(nextTenant);
       })
       .catch(() => undefined);
+
+    adminListRoles(token)
+      .then((resp) => {
+        setDeviceRoles(resp.items ?? {});
+      })
+      .catch(() => {
+        setDeviceRoles({});
+      });
   }, [storedState?.tenant]);
 
   useEffect(() => {
@@ -268,14 +293,16 @@ export default function InformesPage() {
         if (cancelled) return;
         setResolvedPrice(response.price);
         setResolvedPriceSource(response.source);
+        setResolvedPriceKey(response.matched_key ?? null);
         if (!priceOverride) {
           setManualPrice(response.price);
         }
       })
       .catch(() => {
         if (cancelled) return;
-        setResolvedPrice(0.14);
+        setResolvedPrice(INITIAL_PRICE_FALLBACK);
         setResolvedPriceSource("fallback");
+        setResolvedPriceKey(null);
       })
       .finally(() => {
         if (!cancelled) setPriceLoading(false);
@@ -285,6 +312,16 @@ export default function InformesPage() {
       cancelled = true;
     };
   }, [tenant, client, site, serial, priceOverride]);
+
+
+  const shouldShowPricing = useMemo(() => {
+    if (selected.length === 0) return false;
+    return selected.some((device) => {
+      const role = deviceRoles[device];
+      if (role && ENERGY_ROLE_SET.has(role)) return true;
+      return deviceLooksEnergy(device);
+    });
+  }, [selected, deviceRoles]);
 
   const rangePayload = useMemo(() => {
     try {
@@ -444,23 +481,27 @@ export default function InformesPage() {
       </div>
       <p className="text-xs text-slate-400">{rangeMode === "last_n_days" ? "Se usará desde ahora menos N días hasta ahora." : rangeMode === "month_to_date" ? "Mes en curso: desde el día 1 a las 00:00 hasta este momento." : rangeMode === "previous_full_month" ? "Mes anterior completo: desde el día 1 00:00 hasta el último día 23:59:59." : "Se usará exactamente desde las 00:00 del inicio hasta las 23:59:59 del fin."}</p>
 
-      <div className="rounded border border-slate-800 p-4 space-y-2">
-        <p className="text-sm font-semibold">Tarifa energética</p>
-        <p className="text-sm text-slate-200">Precio aplicado al informe: <span className="font-semibold">{(priceOverride ? manualPrice : resolvedPrice).toFixed(3)} €/kWh</span></p>
-        <p className="text-xs text-slate-400">{priceLoading ? "Resolviendo tarifa por defecto..." : `Tarifa por defecto detectada: ${resolvedPrice.toFixed(3)} €/kWh · Origen: ${PRICE_SOURCE_LABELS[resolvedPriceSource]}`}</p>
-        <p className="text-xs text-slate-500">Este valor se aplicará a los medidores energéticos incluidos en el informe. Por defecto se usa la tarifa configurada para esta instalación o equipo. Puedes cambiarla solo para este informe si lo necesitas.</p>
-        <label className="inline-flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={priceOverride} onChange={(event) => {
-            const enabled = event.target.checked;
-            setPriceOverride(enabled);
-            if (!enabled) setManualPrice(resolvedPrice);
-          }} />
-          Usar otra tarifa para este informe
-        </label>
-        {priceOverride && (
-          <input type="number" min={0} step="0.001" value={manualPrice} onChange={(event) => setManualPrice(Number(event.target.value))} className="rounded border border-slate-700 bg-slate-950 p-2 max-w-xs" />
-        )}
-      </div>
+      {shouldShowPricing && (
+        <div className="rounded border border-slate-800 p-4 space-y-2">
+          <p className="text-sm font-semibold">Tarifa energética</p>
+          <p className="text-sm text-slate-200">Precio aplicado al informe: <span className="font-semibold">{formatPrice(priceOverride ? manualPrice : resolvedPrice)}</span></p>
+          <p className="text-xs text-slate-400">{priceLoading
+            ? "Resolviendo tarifa por defecto..."
+            : `Tarifa por defecto detectada: ${formatPrice(resolvedPrice)} · Origen: ${PRICE_SOURCE_LABELS[resolvedPriceSource]}${resolvedPriceKey ? ` (${resolvedPriceKey})` : ""}`}</p>
+          <p className="text-xs text-slate-500">Este valor se aplicará a los medidores energéticos incluidos en el informe. Por defecto se usa la tarifa configurada para esta instalación o equipo. Puedes cambiarla solo para este informe si lo necesitas.</p>
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={priceOverride} onChange={(event) => {
+              const enabled = event.target.checked;
+              setPriceOverride(enabled);
+              if (!enabled) setManualPrice(resolvedPrice);
+            }} />
+            Usar otra tarifa para este informe
+          </label>
+          {priceOverride && (
+            <input type="number" min={0} step="0.001" value={manualPrice} onChange={(event) => setManualPrice(Number(event.target.value))} className="rounded border border-slate-700 bg-slate-950 p-2 max-w-xs" />
+          )}
+        </div>
+      )}
 
       <div className="rounded border border-slate-800 p-3">
         <button

@@ -508,7 +508,11 @@ elif mode == "🔭 Explorador de Datos":
                     s = st.date_input("Inicio", value=date.today()-timedelta(days=7)); e = st.date_input("Fin", value=date.today())
                     if s and e: range_flux = f"start: {s.strftime('%Y-%m-%dT00:00:00Z')}, stop: {(e+timedelta(days=1)).strftime('%Y-%m-%dT00:00:00Z')}"
             with c_cost:
-                price = st.number_input("Coste (€/kWh)", 0.0, 10.0, 0.14)
+                st.caption("Tarifa energética: se resuelve automáticamente por alcance (serial → instalación → cliente → tenant → fallback).")
+                use_manual_price = st.checkbox("Usar otra tarifa para este informe", value=False)
+                price = None
+                if use_manual_price:
+                    price = st.number_input("Tarifa manual (€/kWh)", 0.0, 10.0, 0.14)
                 debug_mode = st.checkbox("Debug")
                 max_workers = st.slider("Workers", min_value=1, max_value=6, value=4, help="Tuning recomendado BeaglePlay: 4-6")
                 force_recalculate = st.checkbox("Forzar recalcular", value=False)

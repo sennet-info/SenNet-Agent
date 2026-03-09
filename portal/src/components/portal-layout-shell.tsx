@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, BellRing, Cable, CalendarClock, Factory, FileText, Home } from "lucide-react";
+import { BarChart3, BellRing, Cable, CalendarClock, Factory, FileText, Home, Tags } from "lucide-react";
 
 import { SidebarProvider, useSidebar } from "@/components/sidebar-context";
 
@@ -42,6 +42,11 @@ const navItems = [
     href: "/programador",
     icon: CalendarClock,
   },
+  {
+    name: "Tarifas",
+    href: "/tarifas-default",
+    icon: Tags,
+  },
 ];
 
 const sectionLabels: Record<string, string> = {
@@ -51,6 +56,7 @@ const sectionLabels: Record<string, string> = {
   inventario: "Inventario",
   alertas: "Alertas",
   programador: "Programador",
+  "tarifas-default": "Tarifas por defecto",
 };
 
 function ShellContent({ children }: { children: React.ReactNode }) {

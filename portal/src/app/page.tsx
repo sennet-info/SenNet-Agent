@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ComponentType } from "react";
-import { BarChart3, BellRing, Cable, CalendarClock, Factory, FileText } from "lucide-react";
+import { BarChart3, BellRing, Cable, CalendarClock, Factory, FileText, Tags } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -72,6 +72,15 @@ const adminModules: HomeItem[] = [
     action: "Abrir Programador",
     badge: "Soporte",
     icon: CalendarClock,
+  },
+  {
+    title: "Tarifas por defecto",
+    subtitle: "Administración",
+    description: "Define tarifas energéticas por alcance: tenant, cliente, instalación y serial.",
+    href: "/tarifas-default",
+    action: "Administrar Tarifas",
+    badge: "Admin",
+    icon: Tags,
   },
 ];
 
