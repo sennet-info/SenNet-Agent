@@ -5,6 +5,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 APP_DIR = BASE_DIR / "app"
 TENANTS_PATH = APP_DIR / "config_tenants.json"
 ROLES_PATH = APP_DIR / "device_roles.json"
+ENERGY_PRICES_PATH = Path("/opt/sennet-agent/energy_prices.json")
 OUTPUT_DIR = (APP_DIR / "output").resolve()
 
 
@@ -60,6 +61,20 @@ def save_roles_config(roles: dict):
     with ROLES_PATH.open("w", encoding="utf-8") as handle:
         json.dump(roles, handle, indent=2, ensure_ascii=False)
 
+
+
+def load_energy_prices_config():
+    if not ENERGY_PRICES_PATH.exists():
+        return {}
+    with ENERGY_PRICES_PATH.open("r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    return data if isinstance(data, dict) else {}
+
+
+def save_energy_prices_config(prices: dict):
+    ENERGY_PRICES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with ENERGY_PRICES_PATH.open("w", encoding="utf-8") as handle:
+        json.dump(prices, handle, indent=2, ensure_ascii=False)
 
 def get_tenant_auth(tenant: str):
     tenants = load_tenants_config()

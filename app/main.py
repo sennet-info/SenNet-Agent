@@ -5,6 +5,7 @@ import streamlit as st
 
 from core.discovery import list_clients, list_devices, list_serials, list_sites
 from core.report import generate_report_pdf
+from modules.energy_pricing import resolve_energy_price
 
 _FALLBACK_RUNTIME_STATE = {}
 
@@ -54,7 +55,7 @@ def run_analysis_discovery(
     site,
     devices,
     range_flux="7d",
-    default_price=0.14,
+    default_price=None,
     callback_status=None,
     serial=None,
     debug_mode=False,
@@ -63,6 +64,14 @@ def run_analysis_discovery(
     max_workers=4,
     force_recalculate=False,
 ):
+    effective_price, _pricing_meta = resolve_energy_price(
+        tenant=auth_config.get("tenant_alias") or auth_config.get("org"),
+        client=client,
+        site=site,
+        serial=serial,
+        override_price=default_price,
+    )
+
     cache_key = json.dumps(
         {
             "tenant": auth_config.get("org"),
@@ -72,7 +81,7 @@ def run_analysis_discovery(
             "serial": serial,
             "range_flux": range_flux,
             "devices": list(devices),
-            "price": default_price,
+            "price": effective_price,
             "start_dt": start_dt,
             "end_dt": end_dt,
         },
@@ -95,7 +104,7 @@ def run_analysis_discovery(
         site=site,
         devices=devices,
         range_flux=range_flux,
-        price=default_price,
+        price=effective_price,
         serial=serial,
         start_dt=start_dt,
         end_dt=end_dt,
