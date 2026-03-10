@@ -12,6 +12,7 @@ import {
   AlertRule,
   AlertRuleType,
   AlertsState,
+  AlertValidationDebug,
 } from "@/lib/alerts-types";
 
 type DiscoveryState = {
@@ -229,6 +230,59 @@ function SectionCard({ title, subtitle, children }: { title: string; subtitle: s
   );
 }
 
+
+
+function ValidationModal({ result, onClose }: { result: AlertValidationDebug; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/80 p-4">
+      <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-semibold">Validación de alerta</h3>
+          <button className="rounded-lg border border-slate-700 px-3 py-1 text-xs" onClick={onClose}>Cerrar</button>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <SectionCard title="1. Resumen" subtitle="Resultado general de la evaluación.">
+            <ul className="space-y-1 text-sm text-slate-300">
+              <li><b>Regla:</b> {result.rule_snapshot.name}</li>
+              <li><b>Tipo:</b> {result.rule_snapshot.type}</li>
+              <li><b>Severidad:</b> {result.rule_snapshot.severity}</li>
+              <li><b>Scope:</b> {result.scope_resolved.tenant} / {result.scope_resolved.client ?? "-"} / {result.scope_resolved.site ?? "-"}</li>
+              <li><b>Modo:</b> {result.scope_resolved.mode}</li>
+              <li><b>Inicio:</b> {result.evaluation_started_at}</li>
+              <li><b>Duración:</b> {result.evaluation_elapsed_ms} ms</li>
+              <li><b>Resultado:</b> {result.fired ? "DISPARA" : "NO DISPARA"}</li>
+            </ul>
+          </SectionCard>
+          <SectionCard title="2. Datos analizados" subtitle="Entradas crudas, transformadas y cobertura.">
+            <p className="text-xs text-slate-400">Afectados: {result.affected.length} · serials: {result.scope_resolved.serials.length} · devices: {result.scope_resolved.deviceIds.length}</p>
+            <pre className="mt-2 overflow-auto rounded-lg bg-slate-950 p-3 text-xs">{JSON.stringify({ inputs_raw: result.inputs_raw, inputs_used: result.inputs_used }, null, 2)}</pre>
+          </SectionCard>
+          <SectionCard title="3. Lógica de decisión" subtitle="Explicación humana del disparo/supresión.">
+            <ul className="space-y-1 text-sm text-slate-300">
+              <li><b>Mensaje:</b> {result.message}</li>
+              <li><b>Motivo:</b> {result.evaluation_reason}</li>
+              <li><b>Edge:</b> {result.edge_decision.reason}</li>
+              <li><b>Cooldown:</b> {result.cooldown_decision.reason} ({result.cooldown_decision.cooldown_remaining_ms} ms restantes)</li>
+              <li><b>Suprimida por:</b> {result.suppressed_by.join(", ") || "ninguno"}</li>
+            </ul>
+          </SectionCard>
+          <SectionCard title="4. Eventos simulados" subtitle="Qué eventos se crearían en grouped/per_device.">
+            <p className="text-sm text-slate-300">Se crearían: {result.would_create_events ? result.simulated_events.length : 0} evento(s)</p>
+            <pre className="mt-2 overflow-auto rounded-lg bg-slate-950 p-3 text-xs">{JSON.stringify(result.simulated_events, null, 2)}</pre>
+          </SectionCard>
+          <SectionCard title="5. Notificación simulada" subtitle="Preview de envío y supresiones.">
+            <p className="text-sm text-slate-300">¿Notificaría?: {result.would_notify ? "Sí" : "No"}</p>
+            <pre className="mt-2 overflow-auto rounded-lg bg-slate-950 p-3 text-xs">{JSON.stringify(result.delivery_preview ?? {}, null, 2)}</pre>
+          </SectionCard>
+          <SectionCard title="6. JSON técnico" subtitle="Bloque completo para soporte y desarrollo.">
+            <pre className="overflow-auto rounded-lg bg-slate-950 p-3 text-xs">{JSON.stringify(result, null, 2)}</pre>
+          </SectionCard>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AlertasPage() {
   const [token, setToken] = useState("");
   const [tab, setTab] = useState<"rules" | "events" | "status">("rules");
@@ -238,6 +292,8 @@ export default function AlertasPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testingRuleId, setTestingRuleId] = useState<string | null>(null);
+  const [validationResult, setValidationResult] = useState<AlertValidationDebug | null>(null);
   const [form, setForm] = useState<Partial<AlertRule>>(emptyRule);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [discovery, setDiscovery] = useState<DiscoveryState>({ tenants: [], clients: [], sites: [], serials: [], devices: [] });
@@ -385,6 +441,25 @@ export default function AlertasPage() {
       setSaving(false);
     }
   }, [authHeaders, editingId, form, loadAll, token, typeConfig.defaults]);
+
+  const testRule = useCallback(async (ruleId: string) => {
+    if (!token) {
+      setError("Ingresa un token de administrador para validar.");
+      return;
+    }
+    setTestingRuleId(ruleId);
+    setError("");
+    try {
+      const resp = await fetch(`/api/alerts/rules/${ruleId}/test`, { method: "POST", headers: authHeaders });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data?.detail ?? "No se pudo validar la regla");
+      setValidationResult(data?.result?.debug ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error ejecutando validación");
+    } finally {
+      setTestingRuleId(null);
+    }
+  }, [authHeaders, token]);
 
   const removeRule = useCallback(async (id: string) => {
     if (!token) return;
@@ -565,6 +640,7 @@ export default function AlertasPage() {
                     </div>
                     <p className="mt-2 text-xs text-slate-400">Última ejecución: {rule.lastRunAt ?? "-"} · Resultado: {rule.lastResult?.message ?? "-"}</p>
                     <div className="mt-3 flex gap-2">
+                      <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => testRule(rule.id)}>{testingRuleId === rule.id ? "Validando..." : "Validar"}</button>
                       <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => { setEditingId(rule.id); setForm(rule); }}>Editar</button>
                       <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => removeRule(rule.id)}>Eliminar</button>
                     </div>
@@ -603,6 +679,7 @@ export default function AlertasPage() {
           <button className="rounded-xl bg-blue-700 px-3 py-2" onClick={async () => { await fetch("/api/alerts/run", { method: "POST", headers: authHeaders }); await loadAll(); }}>Ejecutar evaluación ahora</button>
         </div>
       ) : null}
+      {validationResult ? <ValidationModal result={validationResult} onClose={() => setValidationResult(null)} /> : null}
     </section>
   );
 }
