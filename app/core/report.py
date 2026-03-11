@@ -1,6 +1,7 @@
 import os
 import time
 import hashlib
+import re
 from datetime import timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -112,6 +113,25 @@ def generate_report_pdf(
     processed_devices = []
     devices_with_kpis = set()
     devices_without_data = set()
+    device_debug = {}
+
+
+    def _new_device_debug(device_name):
+        return {
+            "device": device_name,
+            "daily_queried": False,
+            "raw_queried": False,
+            "daily_rows": 0,
+            "raw_rows": 0,
+            "periods": [],
+            "generated_kpis": 0,
+            "used_in_pdf": False,
+            "discard_reason": None,
+            "price_input_to_analyzer": None,
+            "price_used_in_analyzer": None,
+            "computed_cost": None,
+            "kpi_secondary_value": None,
+        }
 
     def _to_df(frame):
         if isinstance(frame, list):
@@ -171,12 +191,12 @@ def generate_report_pdf(
     def _process_device_period(dev_name, period):
         section_name = period["section"]
         period_start = time.perf_counter()
-        df_daily = fetcher.get_data_daily(
+        df_daily = _to_df(fetcher.get_data_daily(
             auth_config["bucket"], dev_name, period["range_flux"], client=client, site=site, serial=serial
-        )
-        df_raw = fetcher.get_data_raw(
+        ))
+        df_raw = _to_df(fetcher.get_data_raw(
             auth_config["bucket"], dev_name, period["range_flux"], client=client, site=site, serial=serial
-        )
+        ))
         fetch_elapsed = time.perf_counter() - period_start
 
         analysis_elapsed = 0.0
@@ -187,6 +207,28 @@ def generate_report_pdf(
             kpis = Analyzer.analyze_device_dual(df_daily, df_raw, dev_name, price) or []
             analysis_elapsed = time.perf_counter() - analysis_start
 
+        computed_cost = None
+        kpi_secondary_value = None
+        price_used_in_analyzer = None
+        energy_kpi = next((item for item in kpis if item.get("type") == "energy" and item.get("secondary_value")), None)
+        if energy_kpi:
+            kpi_secondary_value = energy_kpi.get("secondary_value")
+            numeric_cost = re.findall(r"[-+]?\d*\.?\d+", str(kpi_secondary_value or ""))
+            if numeric_cost:
+                try:
+                    computed_cost = float(numeric_cost[0])
+                except ValueError:
+                    computed_cost = None
+            main_val = str(energy_kpi.get("main_value", ""))
+            main_num = re.findall(r"[-+]?\d*\.?\d+", main_val)
+            if main_num:
+                try:
+                    total_energy = float(main_num[0])
+                    if total_energy > 0 and computed_cost is not None:
+                        price_used_in_analyzer = computed_cost / total_energy
+                except ValueError:
+                    price_used_in_analyzer = None
+
         return {
             "device": dev_name,
             "section": section_name,
@@ -196,7 +238,56 @@ def generate_report_pdf(
             "analysis_elapsed": analysis_elapsed,
             "df_daily": df_daily,
             "df_raw": df_raw,
+            "daily_rows": int(len(df_daily.index)),
+            "raw_rows": int(len(df_raw.index)),
+            "computed_cost": computed_cost,
+            "kpi_secondary_value": kpi_secondary_value,
+            "price_input_to_analyzer": price,
+            "price_used_in_analyzer": price_used_in_analyzer,
         }
+
+    def _register_result(result, dev_name):
+        timings["fetch"] += result["fetch_elapsed"]
+        if result["device"] not in processed_devices:
+            processed_devices.append(result["device"])
+
+        device_entry = device_debug.setdefault(result["device"], _new_device_debug(result["device"]))
+        device_entry["daily_queried"] = True
+        device_entry["raw_queried"] = True
+        device_entry["daily_rows"] += result["daily_rows"]
+        device_entry["raw_rows"] += result["raw_rows"]
+        device_entry["price_input_to_analyzer"] = result["price_input_to_analyzer"]
+        device_entry["price_used_in_analyzer"] = result["price_used_in_analyzer"]
+        device_entry["computed_cost"] = result["computed_cost"]
+        device_entry["kpi_secondary_value"] = result["kpi_secondary_value"]
+        device_entry["periods"].append({
+            "section": result["section"],
+            "daily_rows": result["daily_rows"],
+            "raw_rows": result["raw_rows"],
+            "generated_kpis": len(result["kpis"]),
+        })
+
+        _collect_series_stats(result["device"], result["df_daily"])
+        _collect_series_stats(result["device"], result["df_raw"])
+
+        if result["kpis"]:
+            devices_with_kpis.add(dev_name)
+            device_entry["generated_kpis"] += len(result["kpis"])
+            device_entry["used_in_pdf"] = True
+            for kpi in result["kpis"]:
+                key = f"{dev_name} {kpi.get('suffix_name', '')}".strip()
+                final_report_data[result["section"]][key] = kpi
+        else:
+            if not result.get("has_data"):
+                devices_without_data.add(dev_name)
+                device_entry["discard_reason"] = "no_data_for_filters"
+        if not result["kpis"] and len(periods) > 1:
+            final_report_data[result["section"]][f"{dev_name} (Resumen)"] = {
+                "main_value": "Sin datos para este periodo",
+                "secondary_value": "",
+                "label_main": "Estado",
+                "label_sec": "",
+            }
 
     work = [(dev_name, period) for dev_name in devices for period in periods]
     total = max(len(work), 1)
@@ -209,27 +300,10 @@ def generate_report_pdf(
                 callback_status(f"Analizando: {dev_name}", processed / total)
             try:
                 result = _process_device_period(dev_name, period)
-                timings["fetch"] += result["fetch_elapsed"]
-                if result["device"] not in processed_devices:
-                    processed_devices.append(result["device"])
-                _collect_series_stats(result["device"], result["df_daily"])
-                _collect_series_stats(result["device"], result["df_raw"])
-                if result["kpis"]:
-                    devices_with_kpis.add(dev_name)
-                    for kpi in result["kpis"]:
-                        key = f"{dev_name} {kpi.get('suffix_name', '')}".strip()
-                        final_report_data[result["section"]][key] = kpi
-                else:
-                    if not result.get("has_data"):
-                        devices_without_data.add(dev_name)
-                if not result["kpis"] and len(periods) > 1:
-                    final_report_data[result["section"]][f"{dev_name} (Resumen)"] = {
-                        "main_value": "Sin datos para este periodo",
-                        "secondary_value": "",
-                        "label_main": "Estado",
-                        "label_sec": "",
-                    }
+                _register_result(result, dev_name)
             except Exception as exc:
+                device_entry = device_debug.setdefault(dev_name, _new_device_debug(dev_name))
+                device_entry["discard_reason"] = f"processing_error: {exc}"
                 warnings.append(f"Error analizando {dev_name}: {exc}")
                 print(f"Error analizando {dev_name}: {exc}")
     else:
@@ -243,29 +317,20 @@ def generate_report_pdf(
                     callback_status(f"Analizando: {dev_name}", processed / total)
                 try:
                     result = future.result()
-                    timings["fetch"] += result["fetch_elapsed"]
-                    if result["device"] not in processed_devices:
-                        processed_devices.append(result["device"])
-                    _collect_series_stats(result["device"], result["df_daily"])
-                    _collect_series_stats(result["device"], result["df_raw"])
-                    if result["kpis"]:
-                        devices_with_kpis.add(dev_name)
-                        for kpi in result["kpis"]:
-                            key = f"{dev_name} {kpi.get('suffix_name', '')}".strip()
-                            final_report_data[result["section"]][key] = kpi
-                    else:
-                        if not result.get("has_data"):
-                            devices_without_data.add(dev_name)
-                    if not result["kpis"] and len(periods) > 1:
-                        final_report_data[result["section"]][f"{dev_name} (Resumen)"] = {
-                            "main_value": "Sin datos para este periodo",
-                            "secondary_value": "",
-                            "label_main": "Estado",
-                            "label_sec": "",
-                        }
+                    _register_result(result, dev_name)
                 except Exception as exc:
+                    device_entry = device_debug.setdefault(dev_name, _new_device_debug(dev_name))
+                    device_entry["discard_reason"] = f"processing_error: {exc}"
                     warnings.append(f"Error analizando {dev_name}: {exc}")
                     print(f"Error analizando {dev_name}: {exc}")
+
+    for dev_name in devices:
+        device_entry = device_debug.setdefault(dev_name, _new_device_debug(dev_name))
+        if not device_entry.get("used_in_pdf") and not device_entry.get("discard_reason"):
+            if device_entry.get("daily_rows", 0) == 0 and device_entry.get("raw_rows", 0) == 0:
+                device_entry["discard_reason"] = "no_data_for_filters"
+            else:
+                device_entry["discard_reason"] = "no_kpis_generated"
 
     if callback_status:
         callback_status("Generando PDF...", 1.0)
@@ -328,6 +393,7 @@ def generate_report_pdf(
                     "range_flux": range_flux,
                     "price": price,
                     "price_applied_kwh": price,
+                    "price_used_in_pdf": price,
                     "max_workers": max_workers,
                     "force_recalculate": force_recalculate,
                 },
@@ -355,6 +421,7 @@ def generate_report_pdf(
                 },
                 "sample_rows": sample_rows,
                 "timings_ms": {key: int(value * 1000) for key, value in timings.items()},
+                "device_debug": device_debug,
                 "warnings": warnings,
             }
 

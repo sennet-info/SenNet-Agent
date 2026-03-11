@@ -570,6 +570,8 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     }
     report_inputs = debug_payload.get("inputs") if isinstance(debug_payload.get("inputs"), dict) else {}
     report_price = report_inputs.get("price_applied_kwh", report_inputs.get("price"))
+    report_price_pdf = report_inputs.get("price_used_in_pdf", report_price)
+    report_device_debug = debug_payload.get("device_debug") if isinstance(debug_payload.get("device_debug"), dict) else {}
     report_devices_processed = report_inputs.get("devices_processed") if isinstance(report_inputs.get("devices_processed"), list) else []
     report_devices_with_kpis = report_inputs.get("devices_with_kpis") if isinstance(report_inputs.get("devices_with_kpis"), list) else []
     report_devices_without_data = report_inputs.get("devices_without_data") if isinstance(report_inputs.get("devices_without_data"), list) else []
@@ -590,10 +592,18 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "discard_reasons": device_scope_debug.get("discard_reasons", {}),
         "price_effective": effective_price,
         "price_applied_in_report": report_price,
+        "price_used_in_pdf": report_price_pdf,
         "price_matches_report": report_price == effective_price if isinstance(report_price, (int, float)) else None,
+        "price_used_in_pdf_matches_effective": report_price_pdf == effective_price if isinstance(report_price_pdf, (int, float)) else None,
+        "price_used_in_analyzer": {
+            dev: info.get("price_used_in_analyzer")
+            for dev, info in report_device_debug.items()
+            if isinstance(info, dict)
+        },
         "devices_processed_in_report": report_devices_processed,
         "devices_with_kpis": report_devices_with_kpis,
         "devices_without_data": report_devices_without_data,
+        "device_debug": report_device_debug,
     }
 
     return {

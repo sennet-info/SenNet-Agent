@@ -71,6 +71,7 @@ def main():
         device_scope = debug.get("device_scope") or {}
         pricing = debug.get("pricing") or {}
         audit = debug.get("audit") or {}
+        device_debug = audit.get("device_debug") or {}
 
         assert_true(run_resp.get("ok") is True, "run: expected ok=true")
         assert_true(run_resp.get("email_sent") is True, "run: expected email_sent=true")
@@ -85,6 +86,8 @@ def main():
         assert_true("price_scope" in pricing, "pricing.price_scope missing")
         assert_true("price_scope_matched_key" in pricing, "pricing.price_scope_matched_key missing")
         assert_true("price_applied_in_report" in audit, "audit.price_applied_in_report missing")
+        assert_true("price_used_in_pdf" in audit, "audit.price_used_in_pdf missing")
+        assert_true(isinstance(device_debug, dict), "audit.device_debug must be dict")
         assert_true(audit.get("price_matches_report") in {True, None}, "audit.price_matches_report should be true when available")
 
         if args.extra_device:
@@ -94,14 +97,22 @@ def main():
             processed = set(audit.get("devices_processed_in_report") or [])
             resolved = set(device_scope.get("resolved_devices") or [])
             assert_true(processed.issubset(resolved), "processed devices must be subset of resolved_devices")
+            for dev in expected:
+                assert_true(dev in device_debug, f"device_debug missing for {dev}")
+                info = device_debug.get(dev) or {}
+                assert_true("daily_rows" in info and "raw_rows" in info, f"device_debug rows missing for {dev}")
+                assert_true("generated_kpis" in info, f"device_debug generated_kpis missing for {dev}")
 
         if args.serial and args.serial_price is not None:
             assert_true(pricing.get("price_source") == "serial", "pricing.price_source should be serial")
             assert_true(pricing.get("price_scope_matched_key") == args.serial, "pricing.price_scope_matched_key should match serial")
             assert_true(abs(float(pricing.get("price_effective")) - args.serial_price) < 1e-9, "pricing.price_effective mismatch")
             report_price = audit.get("price_applied_in_report")
+            pdf_price = audit.get("price_used_in_pdf")
             assert_true(isinstance(report_price, (int, float)), "audit.price_applied_in_report should be numeric")
+            assert_true(isinstance(pdf_price, (int, float)), "audit.price_used_in_pdf should be numeric")
             assert_true(abs(float(report_price) - args.serial_price) < 1e-9, "audit.price_applied_in_report mismatch")
+            assert_true(abs(float(pdf_price) - args.serial_price) < 1e-9, "audit.price_used_in_pdf mismatch")
 
         print("Scheduler smoke assertions OK")
     finally:
