@@ -9,6 +9,9 @@ from fastapi import HTTPException
 from modules.report_range import compute_report_range, to_flux_range
 
 MODE_ALIASES = {
+    "last_7_days": "last_n_days",
+    "last_15_days": "last_n_days",
+    "last_30_days": "last_n_days",
     "last_days": "last_n_days",
     "last_n_days": "last_n_days",
     "full_month": "month_to_date",
@@ -64,6 +67,13 @@ def resolve_report_time(payload: Any, now: Optional[datetime] = None) -> Resolve
         raise HTTPException(status_code=422, detail="Modo personalizado requiere start_dt y end_dt")
     elif mode == "last_n_days":
         days = getattr(payload, "last_days", None)
+        if days is None:
+            if raw_mode == "last_7_days":
+                days = 7
+            elif raw_mode == "last_15_days":
+                days = 15
+            elif raw_mode == "last_30_days":
+                days = 30
         if not days:
             range_flux = (getattr(payload, "range_flux", "") or "").strip()
             if range_flux.endswith("d") and range_flux[:-1].isdigit():

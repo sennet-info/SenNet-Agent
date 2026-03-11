@@ -5,16 +5,18 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from types import SimpleNamespace
+from typing import Any
 
 from fastapi import HTTPException
 
 from agent_api.config import APP_DIR, get_tenant_auth, safe_output_path
 from agent_api.pricing import resolve_default_price
-from agent_api.scheduler_store import list_tasks, smtp_store, scheduler_tasks_store
-from modules.email_sender import EmailSender
-from modules.report_range import DEFAULT_REPORT_RANGE_MODE, compute_report_range, to_flux_range
+from agent_api.report_time import resolve_report_time
+from agent_api.scheduler_store import list_tasks, scheduler_tasks_store, smtp_store
+from core.discovery import list_devices
 from core.report import generate_report_pdf
+from modules.email_sender import EmailSender
 
 MAX_DEVICES = 50
 SCHEDULER_RUN_TIMEOUT_SECONDS = 240
@@ -39,42 +41,71 @@ def _emails_html(task: dict[str, Any], start_dt: datetime, end_dt: datetime, sou
     return subject, body
 
 
-def _resolve_devices(task: dict[str, Any]) -> list[str]:
-    items = [task.get("device"), *(task.get("extra_devices") or [])]
-    dedup: list[str] = []
-    for item in items:
-        if item and item not in dedup:
-            dedup.append(item)
-    if not dedup:
+def _resolve_requested_devices(task: dict[str, Any]) -> tuple[str, list[str]]:
+    requested_device = task.get("device")
+    requested_extras = task.get("extra_devices") or []
+    if not requested_device:
         raise HTTPException(status_code=422, detail="device principal obligatorio")
-    if len(dedup) > MAX_DEVICES:
+
+    dedup_extras: list[str] = []
+    for item in requested_extras:
+        if item and item != requested_device and item not in dedup_extras:
+            dedup_extras.append(item)
+    return requested_device, dedup_extras
+
+
+def _resolve_scope_devices(task: dict[str, Any], auth_config: dict[str, Any]) -> tuple[list[str], list[dict[str, str]], list[str], list[str]]:
+    requested_device, requested_extras = _resolve_requested_devices(task)
+    requested_all = [requested_device, *requested_extras]
+    available = list_devices(auth_config, task["client"], task["site"], serial=task.get("serial"))
+
+    resolved: list[str] = []
+    discarded: list[dict[str, str]] = []
+    for item in requested_all:
+        if item in available:
+            if item not in resolved:
+                resolved.append(item)
+        else:
+            discarded.append({"device": item, "reason": "not_available_in_scope"})
+
+    if not resolved:
+        raise HTTPException(status_code=422, detail="Ningún dispositivo solicitado está disponible para el alcance tenant/client/site/serial")
+    if len(resolved) > MAX_DEVICES:
         raise HTTPException(status_code=422, detail=f"devices excede el máximo permitido ({MAX_DEVICES})")
-    return dedup
+
+    return resolved, discarded, requested_all, available
 
 
-def _resolve_time(task: dict[str, Any]) -> tuple[datetime, datetime, str, str, str]:
-    if task.get("range_flux"):
-        now = _now()
-        mode = task.get("report_range_mode") or "custom"
-        label = task.get("report_range_mode") or "Flux custom"
-        return now, now, task["range_flux"], mode, label
-
-    if task.get("start_dt") and task.get("end_dt"):
-        start_dt = datetime.fromisoformat(task["start_dt"])
-        end_dt = datetime.fromisoformat(task["end_dt"])
-        return start_dt, end_dt, to_flux_range(start_dt, end_dt), "custom", "Rango fijo"
-
-    range_mode = task.get("report_range_mode") or DEFAULT_REPORT_RANGE_MODE
-    start_dt, end_dt = compute_report_range(range_mode)
-    return start_dt, end_dt, to_flux_range(start_dt, end_dt), range_mode, range_mode
+def _resolve_time(task: dict[str, Any]):
+    payload = SimpleNamespace(
+        range_mode=task.get("report_range_mode"),
+        last_days=task.get("last_days"),
+        range_label=task.get("range_label"),
+        timezone=task.get("timezone"),
+        start_dt=datetime.fromisoformat(task["start_dt"]) if task.get("start_dt") else None,
+        end_dt=datetime.fromisoformat(task["end_dt"]) if task.get("end_dt") else None,
+        range_flux=task.get("range_flux"),
+    )
+    return resolve_report_time(payload, now=_now().astimezone())
 
 
-async def execute_scheduled_task(task: dict[str, Any], *, trigger_source: str, debug: bool = True, send_email: bool = True, max_workers: int = 4, debug_sample_n: int = 10, force_recalculate: bool = False) -> dict[str, Any]:
-    devices = _resolve_devices(task)
-    start_dt, end_dt, range_flux, range_mode, range_label = _resolve_time(task)
+async def execute_scheduled_task(
+    task: dict[str, Any],
+    *,
+    trigger_source: str,
+    debug: bool = True,
+    send_email: bool = True,
+    max_workers: int = 4,
+    debug_sample_n: int = 10,
+    force_recalculate: bool = False,
+) -> dict[str, Any]:
     tenant = task.get("tenant_alias") or task.get("tenant")
     if not tenant:
         raise HTTPException(status_code=422, detail="tenant es obligatorio")
+
+    auth_config = get_tenant_auth(tenant)
+    resolved_time = _resolve_time(task)
+    resolved_devices, discarded_devices, requested_devices, available_scope_devices = _resolve_scope_devices(task, auth_config)
 
     effective_price, price_source, price_match_key = resolve_default_price(
         tenant=tenant,
@@ -83,28 +114,26 @@ async def execute_scheduled_task(task: dict[str, Any], *, trigger_source: str, d
         serial=task.get("serial"),
     )
 
-    auth_config = get_tenant_auth(tenant)
-
     async def _build():
         return await asyncio.to_thread(
             generate_report_pdf,
             auth_config,
             task["client"],
             task["site"],
-            devices,
-            range_flux,
+            resolved_devices,
+            resolved_time.range_flux,
             effective_price,
             task.get("serial"),
-            start_dt,
-            end_dt,
+            resolved_time.start_dt,
+            resolved_time.end_dt,
             False,
             None,
             max_workers,
             debug,
             debug_sample_n,
             force_recalculate,
-            range_mode,
-            range_label,
+            resolved_time.range_mode,
+            resolved_time.range_label,
         )
 
     original_cwd = Path.cwd()
@@ -131,7 +160,23 @@ async def execute_scheduled_task(task: dict[str, Any], *, trigger_source: str, d
 
     task_snapshot = {
         k: task.get(k)
-        for k in ["id", "tenant_alias", "client", "site", "serial", "device", "extra_devices", "frequency", "time", "report_range_mode", "range_flux", "start_dt", "end_dt", "emails", "enabled"]
+        for k in [
+            "id",
+            "tenant_alias",
+            "client",
+            "site",
+            "serial",
+            "device",
+            "extra_devices",
+            "frequency",
+            "time",
+            "report_range_mode",
+            "range_flux",
+            "start_dt",
+            "end_dt",
+            "emails",
+            "enabled",
+        ]
     }
     enriched_debug = {
         **(debug_payload if isinstance(debug_payload, dict) else {}),
@@ -141,18 +186,32 @@ async def execute_scheduled_task(task: dict[str, Any], *, trigger_source: str, d
         "client": task.get("client"),
         "site": task.get("site"),
         "serial": task.get("serial"),
-        "device": task.get("device"),
-        "extra_devices": task.get("extra_devices") or [],
-        "resolved_devices": devices,
+        "requested_device": task.get("device"),
+        "requested_extra_devices": task.get("extra_devices") or [],
+        "requested_devices": requested_devices,
+        "resolved_devices": resolved_devices,
+        "discarded_devices": discarded_devices,
+        "available_scope_devices": available_scope_devices,
         "price_effective": effective_price,
         "price_source": price_source,
-        "price_scope": {"tenant": tenant, "client": task.get("client"), "site": task.get("site"), "serial": task.get("serial")},
+        "price_scope": {
+            "tenant": tenant,
+            "client": task.get("client"),
+            "site": task.get("site"),
+            "serial": task.get("serial"),
+        },
         "price_scope_matched_key": price_match_key,
-        "range_mode": range_mode,
-        "range_label": range_label,
-        "start_dt": _iso(start_dt),
-        "end_dt": _iso(end_dt),
-        "range_flux": range_flux,
+        "range_mode": resolved_time.range_mode,
+        "range_label": resolved_time.range_label,
+        "start_dt": _iso(resolved_time.start_dt),
+        "end_dt": _iso(resolved_time.end_dt),
+        "range_flux": resolved_time.range_flux,
+        "range_resolution": {
+            "timezone": resolved_time.timezone,
+            "criteria": resolved_time.criteria,
+            "adjusted": resolved_time.adjusted,
+            "task_report_range_mode": task.get("report_range_mode"),
+        },
         "trigger_source": trigger_source,
     }
 
@@ -161,15 +220,16 @@ async def execute_scheduled_task(task: dict[str, Any], *, trigger_source: str, d
 
     email_sent = False
     email_detail = "email_disabled"
+    recipients = task.get("emails") or []
     if send_email:
         cfg = smtp_store().read(default={})
         required = ["server", "port", "user", "password"]
         missing = [key for key in required if not cfg.get(key)]
         if missing:
             raise HTTPException(status_code=422, detail=f"SMTP incompleto: faltan {', '.join(missing)}")
-        subject, body = _emails_html(task, start_dt, end_dt, trigger_source)
+        subject, body = _emails_html(task, resolved_time.start_dt, resolved_time.end_dt, trigger_source)
         sender = EmailSender(cfg["server"], cfg["port"], cfg["user"], cfg["password"])
-        email_sent, email_detail = sender.send_email(task.get("emails") or [], subject, body, str(safe_path))
+        email_sent, email_detail = sender.send_email(recipients, subject, body, str(safe_path))
         if not email_sent:
             raise HTTPException(status_code=500, detail=email_detail)
 
@@ -180,16 +240,19 @@ async def execute_scheduled_task(task: dict[str, Any], *, trigger_source: str, d
         "debug_path": str(debug_file),
         "debug": enriched_debug if debug else None,
         "email_sent": email_sent,
+        "email_recipients": recipients,
         "email_detail": email_detail,
-        "resolved_devices": devices,
+        "requested_devices": requested_devices,
+        "resolved_devices": resolved_devices,
+        "discarded_devices": discarded_devices,
         "effective_price": effective_price,
         "price_source": price_source,
         "price_match_key": price_match_key,
-        "range_mode": range_mode,
-        "range_label": range_label,
-        "start_dt": _iso(start_dt),
-        "end_dt": _iso(end_dt),
-        "range_flux": range_flux,
+        "range_mode": resolved_time.range_mode,
+        "range_label": resolved_time.range_label,
+        "start_dt": _iso(resolved_time.start_dt),
+        "end_dt": _iso(resolved_time.end_dt),
+        "range_flux": resolved_time.range_flux,
     }
 
 
@@ -285,6 +348,9 @@ def finish_task_run(task_id: str, run_id: str, result: dict[str, Any] | None, er
                 t["last_price_match_key"] = result.get("price_match_key")
                 t["last_debug_path"] = result.get("debug_path")
                 t["last_pdf_path"] = result.get("pdf_path")
+                t["last_email_recipients"] = result.get("email_recipients")
+                t["last_email_detail"] = result.get("email_detail")
+                t["last_discarded_devices"] = result.get("discarded_devices")
                 if result.get("email_sent"):
                     t["last_email_sent_at"] = now_iso
             return tasks
@@ -308,7 +374,18 @@ async def run_due_scheduler_tasks() -> dict[str, Any]:
         try:
             execution = await execute_scheduled_task(task_data, trigger_source="scheduler", debug=True, send_email=True)
             finish_task_run(task_data["id"], run_id, execution, None)
-            results.append({"task_id": task_data["id"], "status": "ok", "run_id": run_id, "price_source": execution.get("price_source"), "effective_price": execution.get("effective_price"), "debug_path": execution.get("debug_path")})
+            results.append({
+                "task_id": task_data["id"],
+                "status": "ok",
+                "run_id": run_id,
+                "price_source": execution.get("price_source"),
+                "effective_price": execution.get("effective_price"),
+                "email_sent": execution.get("email_sent"),
+                "email_detail": execution.get("email_detail"),
+                "resolved_devices": execution.get("resolved_devices"),
+                "discarded_devices": execution.get("discarded_devices"),
+                "debug_path": execution.get("debug_path"),
+            })
         except Exception as exc:  # noqa: BLE001
             finish_task_run(task_data["id"], run_id, None, str(exc))
             results.append({"task_id": task_data.get("id"), "status": "error", "run_id": run_id, "error": str(exc)})

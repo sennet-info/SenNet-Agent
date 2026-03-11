@@ -312,7 +312,14 @@ export default function ProgramadorPage() {
     try {
       const result = await schedulerRunTask(token, taskId);
       window.open(downloadUrl(result.pdf_path), "_blank");
-      setOkMsg(`Ejecución OK: ${result.filename}`);
+      const recipients = (result.email_recipients || []).join(", ");
+      const discarded = (result.discarded_devices || []).map((item) => `${item.device} (${item.reason})`).join(", ");
+      setOkMsg(
+        `Ejecución completa OK: ${result.filename} · email_sent=${result.email_sent ? "sí" : "no"}` +
+          `${recipients ? ` · destinatarios: ${recipients}` : ""}` +
+          `${discarded ? ` · descartados: ${discarded}` : ""}`,
+      );
+      await initialLoad(token);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo ejecutar");
     }
