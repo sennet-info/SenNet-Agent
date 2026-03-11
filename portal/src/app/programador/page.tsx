@@ -80,6 +80,7 @@ export default function ProgramadorPage() {
   const [smtp, setSmtp] = useState<SmtpConfigPayload>(EMPTY_SMTP);
   const [testRecipient, setTestRecipient] = useState("");
   const [emailInput, setEmailInput] = useState("");
+  const [extraDeviceCandidate, setExtraDeviceCandidate] = useState("");
 
   const [form, setForm] = useState({
     name: "",
@@ -88,7 +89,7 @@ export default function ProgramadorPage() {
     site: "",
     serial: "",
     device: "",
-    extraDevicesCsv: "",
+    extraDevices: [] as string[],
     rangeMode: "last_7_days",
     startDt: "",
     endDt: "",
@@ -162,7 +163,18 @@ export default function ProgramadorPage() {
       .catch(() => setDevices([]));
   }, [form.tenant, form.client, form.site, form.serial]);
 
-  const extraDevices = useMemo(() => splitCsv(form.extraDevicesCsv), [form.extraDevicesCsv]);
+  useEffect(() => {
+    setForm((prev) => ({
+      ...prev,
+      extraDevices: prev.extraDevices.filter((item) => item !== prev.device && devices.includes(item)),
+    }));
+  }, [form.device, devices]);
+
+  const extraDevices = useMemo(() => form.extraDevices.filter(Boolean), [form.extraDevices]);
+  const extraDeviceOptions = useMemo(
+    () => devices.filter((item) => item !== form.device && !form.extraDevices.includes(item)),
+    [devices, form.device, form.extraDevices],
+  );
   const validEmails = useMemo(() => form.emails.filter((email) => EMAIL_REGEX.test(email)), [form.emails]);
   const invalidEmails = useMemo(() => form.emails.filter((email) => !EMAIL_REGEX.test(email)), [form.emails]);
   const pendingEmailValid = useMemo(() => (emailInput ? EMAIL_REGEX.test(emailInput.trim()) : true), [emailInput]);
@@ -180,14 +192,30 @@ export default function ProgramadorPage() {
 
   function clearScopedFields(level: "tenant" | "client" | "site") {
     if (level === "tenant") {
-      setForm((p) => ({ ...p, client: "", site: "", serial: "", device: "" }));
+      setForm((p) => ({ ...p, client: "", site: "", serial: "", device: "", extraDevices: [] }));
+      setExtraDeviceCandidate("");
       return;
     }
     if (level === "client") {
-      setForm((p) => ({ ...p, site: "", serial: "", device: "" }));
+      setForm((p) => ({ ...p, site: "", serial: "", device: "", extraDevices: [] }));
+      setExtraDeviceCandidate("");
       return;
     }
-    setForm((p) => ({ ...p, serial: "", device: "" }));
+    setForm((p) => ({ ...p, serial: "", device: "", extraDevices: [] }));
+    setExtraDeviceCandidate("");
+  }
+
+  function addExtraDevice(deviceId: string) {
+    if (!deviceId) return;
+    setForm((prev) => {
+      if (deviceId === prev.device || prev.extraDevices.includes(deviceId)) return prev;
+      return { ...prev, extraDevices: [...prev.extraDevices, deviceId] };
+    });
+    setExtraDeviceCandidate("");
+  }
+
+  function removeExtraDevice(deviceId: string) {
+    setForm((prev) => ({ ...prev, extraDevices: prev.extraDevices.filter((item) => item !== deviceId) }));
   }
 
   function addEmails(raw: string) {
@@ -463,14 +491,44 @@ export default function ProgramadorPage() {
 
               <label className="space-y-1 text-sm md:col-span-2">
                 <span className="text-slate-200">Otros dispositivos a incluir</span>
-                <input
-                  value={form.extraDevicesCsv}
-                  onChange={(e) => setForm((p) => ({ ...p, extraDevicesCsv: e.target.value }))}
-                  placeholder="Ej. disp-001, disp-010, disp-030"
-                  className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2"
-                  disabled={!form.site}
-                />
-                <span className="text-xs text-slate-400">Añade identificadores separados por comas si quieres incluir más equipos en el mismo informe.</span>
+                <div className="flex flex-col gap-2 md:flex-row">
+                  <select
+                    value={extraDeviceCandidate}
+                    onChange={(e) => setExtraDeviceCandidate(e.target.value)}
+                    className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2"
+                    disabled={!form.site || !extraDeviceOptions.length}
+                  >
+                    <option value="">
+                      {!form.site
+                        ? "Primero selecciona una instalación"
+                        : extraDeviceOptions.length
+                          ? "Selecciona otro dispositivo"
+                          : "No hay más dispositivos disponibles"}
+                    </option>
+                    {extraDeviceOptions.map((item) => (
+                      <option key={item} value={item}>{item}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => addExtraDevice(extraDeviceCandidate)}
+                    className="rounded bg-slate-700 px-3 py-2 text-sm disabled:opacity-50"
+                    disabled={!extraDeviceCandidate}
+                  >
+                    Añadir
+                  </button>
+                </div>
+                <span className="text-xs text-slate-400">Selecciona los dispositivos extra desde el desplegable para incluirlos en el mismo informe.</span>
+                {!!extraDevices.length && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {extraDevices.map((item) => (
+                      <span key={item} className="inline-flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-500/10 px-3 py-1 text-xs text-blue-300">
+                        {item}
+                        <button type="button" className="font-bold leading-none" onClick={() => removeExtraDevice(item)}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </label>
             </div>
           </div>
