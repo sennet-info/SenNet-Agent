@@ -73,3 +73,24 @@ export async function notifyForEvent(rule: AlertRule, event: AlertEvent): Promis
     clearTimeout(timeout);
   }
 }
+
+export function previewDelivery(rule: AlertRule): DeliveryResult {
+  const groupEmails = [...(rule.notifications.groups?.client ?? []), ...(rule.notifications.groups?.maintenance ?? [])];
+  const recipients = uniqEmails([...(rule.notifications.emails ?? []), ...groupEmails]);
+  const webhookUrl = rule.notifications.webhookUrl?.trim();
+
+  return {
+    email: {
+      enabled: recipients.length > 0,
+      recipients,
+      mode: "preview",
+    },
+    webhook: webhookUrl
+      ? {
+          attempted: false,
+          ok: false,
+          detail: "Simulación: webhook no ejecutado",
+        }
+      : undefined,
+  };
+}

@@ -48,6 +48,51 @@ export type AlertRule = {
   updatedAt: string;
 };
 
+
+export type AlertValidationDebug = {
+  rule_snapshot: Pick<AlertRule, "id" | "name" | "type" | "severity" | "scope" | "notifications">;
+  evaluation_started_at: string;
+  evaluation_elapsed_ms: number;
+  scope_resolved: {
+    tenant: string;
+    client?: string;
+    site?: string;
+    serials: string[];
+    deviceIds: string[];
+    mode: "per_device" | "grouped";
+    role?: AlertRole;
+  };
+  inputs_raw: Record<string, unknown>;
+  inputs_used: Record<string, unknown>;
+  fired: boolean;
+  message: string;
+  evaluation_reason: string;
+  affected: Array<{ serial?: string; deviceId?: string; label?: string }>;
+  previous_state: {
+    previous_ok: boolean;
+    last_run_at?: string;
+    last_triggered_at?: string;
+    last_message?: string;
+  };
+  edge_decision: {
+    trigger_mode: "edge" | "level";
+    should_notify_by_edge: boolean;
+    reason: string;
+  };
+  cooldown_decision: {
+    cooldown_minutes: number;
+    cooldown_pass: boolean;
+    cooldown_remaining_ms: number;
+    reason: string;
+  };
+  would_create_events: boolean;
+  simulated_events: AlertEvent[];
+  would_notify: boolean;
+  suppressed_by: string[];
+  delivery_preview?: Record<string, unknown>;
+  type_specific_debug: Record<string, unknown>;
+};
+
 export type AlertEvent = {
   id: string;
   timestamp: string;
