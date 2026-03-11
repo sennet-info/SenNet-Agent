@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import Optional
 import asyncio
 import json
@@ -43,13 +44,70 @@ if str(APP_DIR) not in sys.path:
 from core.discovery import list_clients, list_devices, list_serials, list_sites
 from core.report import generate_report_pdf
 from modules.email_sender import EmailSender
-from modules.report_range import compute_report_range, to_flux_range
 
 MAX_DEVICES = 50
 REPORT_TIMEOUT_SECONDS = 180
 SCHEDULER_RUN_TIMEOUT_SECONDS = 240
 
 app = FastAPI(title="SenNet Agent API", version="0.1.0")
+
+
+def _normalize_requested_devices(device: str, extra_devices: list[str]) -> tuple[list[str], list[str], dict[str, str]]:
+    requested = []
+    discarded = []
+    reasons: dict[str, str] = {}
+
+    for raw in [device, *(extra_devices or [])]:
+        item = (raw or "").strip()
+        if not item:
+            continue
+        if item in requested:
+            discarded.append(item)
+            reasons[item] = "duplicate_request"
+            continue
+        requested.append(item)
+
+    return requested, discarded, reasons
+
+
+def _resolve_task_devices(auth_config, task: dict) -> tuple[list[str], dict]:
+    requested, discarded, discard_reasons = _normalize_requested_devices(
+        task.get("device", ""),
+        task.get("extra_devices", []),
+    )
+
+    discovered = list_devices(
+        auth_config,
+        task.get("client", ""),
+        task.get("site", ""),
+        serial=task.get("serial"),
+    )
+    discovered_set = set(discovered)
+    resolved = []
+    for item in requested:
+        if item in discovered_set:
+            resolved.append(item)
+        else:
+            discarded.append(item)
+            discard_reasons[item] = "not_in_discovery_scope"
+
+    scope_debug = {
+        "requested_device": task.get("device"),
+        "requested_extra_devices": task.get("extra_devices", []),
+        "requested_serial": task.get("serial"),
+        "requested_devices": requested,
+        "resolved_devices": resolved,
+        "discarded_devices": discarded,
+        "discard_reasons": discard_reasons,
+        "discovered_devices": discovered,
+        "scope": {
+            "tenant": task.get("tenant_alias"),
+            "client": task.get("client"),
+            "site": task.get("site"),
+            "serial": task.get("serial"),
+        },
+    }
+    return resolved, scope_debug
 
 
 def _require_admin_token(authorization: Optional[str] = Header(default=None)):
@@ -380,22 +438,23 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
 
-    devices = [task["device"], *task.get("extra_devices", [])]
+    auth_config = _tenant_auth_or_404(task["tenant_alias"])
+    devices, device_scope_debug = _resolve_task_devices(auth_config, task)
+    if not devices:
+        raise HTTPException(status_code=422, detail="Ningún dispositivo solicitado pertenece al alcance resuelto")
     if len(devices) > MAX_DEVICES:
         raise HTTPException(status_code=422, detail=f"devices excede el máximo permitido ({MAX_DEVICES})")
 
-    start_dt = None
-    end_dt = None
-    range_flux = task.get("range_flux")
-    if not range_flux:
-        if task.get("start_dt") and task.get("end_dt"):
-            start_dt = datetime.fromisoformat(task["start_dt"])
-            end_dt = datetime.fromisoformat(task["end_dt"])
-        else:
-            start_dt, end_dt = compute_report_range(task.get("report_range_mode"))
-        range_flux = to_flux_range(start_dt, end_dt)
+    scheduler_time_payload = SimpleNamespace(
+        range_mode=task.get("report_range_mode"),
+        range_flux=task.get("range_flux"),
+        last_days=None,
+        start_dt=datetime.fromisoformat(task["start_dt"]) if task.get("start_dt") else None,
+        end_dt=datetime.fromisoformat(task["end_dt"]) if task.get("end_dt") else None,
+        range_label=None,
+    )
+    resolved_time = resolve_report_time(scheduler_time_payload)
 
-    auth_config = _tenant_auth_or_404(task["tenant_alias"])
     effective_price, price_source, price_match_key = resolve_default_price(
         tenant=task.get("tenant_alias"),
         client=task.get("client"),
@@ -410,17 +469,19 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
             task["client"],
             task["site"],
             devices,
-            range_flux,
+            resolved_time.range_flux,
             effective_price,
             task.get("serial"),
-            start_dt,
-            end_dt,
+            resolved_time.start_dt,
+            resolved_time.end_dt,
             False,
             None,
             payload.max_workers,
             payload.debug,
             payload.debug_sample_n,
             payload.force_recalculate,
+            resolved_time.range_mode,
+            resolved_time.range_label,
         )
 
     original_cwd = Path.cwd()
@@ -445,22 +506,76 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     if not safe_path.exists():
         raise HTTPException(status_code=500, detail="PDF generado no encontrado en disco")
 
-    if isinstance(debug_payload, dict):
-        debug_payload.setdefault("pricing", {})
-        debug_payload["pricing"].update({
-            "price_effective": effective_price,
-            "price_source": price_source,
-            "price_override": False,
-            "price_scope": {
-                "tenant": task.get("tenant_alias"),
-                "client": task.get("client"),
-                "site": task.get("site"),
-                "serial": task.get("serial"),
-            },
-            "price_scope_matched_key": price_match_key,
-        })
+    smtp_cfg = smtp_store().read(default={})
+    required = ["server", "port", "user", "password"]
+    missing = [key for key in required if not smtp_cfg.get(key)]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"SMTP incompleto: faltan {', '.join(missing)}")
 
-    return {"ok": True, "pdf_path": str(safe_path), "filename": safe_path.name, "debug": debug_payload}
+    sender = EmailSender(smtp_cfg["server"], smtp_cfg["port"], smtp_cfg["user"], smtp_cfg["password"])
+    recipients = task.get("emails", [])
+    subject = f"📊 Informe Energético: {task['site']} ({datetime.now().strftime('%d/%m/%Y')})"
+    body = (
+        f"<p>Informe automático generado para <strong>{task['site']}</strong> "
+        f"({task['client']}) en rango <strong>{resolved_time.range_label}</strong>.</p>"
+    )
+    email_sent, email_detail = sender.send_email(recipients, subject, body, str(safe_path))
+
+    if not isinstance(debug_payload, dict):
+        debug_payload = {}
+
+    debug_payload.setdefault("inputs", {})
+    debug_payload["inputs"].update({
+        "tenant": task.get("tenant_alias"),
+        "client": task.get("client"),
+        "site": task.get("site"),
+        "serial": task.get("serial"),
+        "devices": devices,
+        "range_mode": task.get("report_range_mode"),
+        "range_flux": resolved_time.range_flux,
+        "start_dt": resolved_time.start_dt.isoformat(),
+        "end_dt": resolved_time.end_dt.isoformat(),
+    })
+    debug_payload["device_scope"] = device_scope_debug
+    debug_payload["resolved_range"] = {
+        "user_mode": task.get("report_range_mode"),
+        "range_mode": resolved_time.range_mode,
+        "range_label": resolved_time.range_label,
+        "start": resolved_time.start_dt.isoformat(),
+        "stop": resolved_time.end_dt.isoformat(),
+        "range_flux": resolved_time.range_flux,
+        "timezone": resolved_time.timezone,
+        "criteria": resolved_time.criteria,
+        "adjusted": resolved_time.adjusted,
+    }
+    debug_payload.setdefault("pricing", {})
+    debug_payload["pricing"].update({
+        "price_effective": effective_price,
+        "price_source": price_source,
+        "price_override": False,
+        "price_scope": {
+            "tenant": task.get("tenant_alias"),
+            "client": task.get("client"),
+            "site": task.get("site"),
+            "serial": task.get("serial"),
+        },
+        "price_scope_matched_key": price_match_key,
+    })
+    debug_payload["delivery"] = {
+        "email_sent": email_sent,
+        "email_recipients": recipients,
+        "email_detail": email_detail,
+    }
+
+    return {
+        "ok": True,
+        "pdf_path": str(safe_path),
+        "filename": safe_path.name,
+        "email_sent": email_sent,
+        "email_recipients": recipients,
+        "email_detail": email_detail,
+        "debug": debug_payload,
+    }
 
 
 @app.get("/v1/scheduler/smtp", dependencies=[Depends(_require_admin_for_smtp_read)])

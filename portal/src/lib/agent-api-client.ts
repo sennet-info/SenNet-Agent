@@ -218,7 +218,7 @@ export async function schedulerRunTask(token: string, taskId: string) {
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({}),
   });
-  return parseJsonResponse<{ ok: boolean; pdf_path: string; filename: string; debug?: unknown }>(response);
+  return parseJsonResponse<{ ok: boolean; pdf_path: string; filename: string; email_sent: boolean; email_recipients: string[]; email_detail: string; debug?: unknown }>(response);
 }
 
 export async function schedulerGetSmtp(token: string) {

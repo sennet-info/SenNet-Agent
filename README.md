@@ -138,7 +138,7 @@ python scripts/smoke_test_api.py --base-url http://127.0.0.1:8000 --tenant <tena
 
 ## Scheduler API (`/v1/scheduler/*`)
 
-Persistencia (fuente de verdad compartida con Streamlit/cron):
+Persistencia (fuente de verdad operativa del scheduler FastAPI):
 
 - `SCHEDULED_TASKS_PATH` (default `/opt/sennet-agent/scheduled_tasks.json`)
 - `SMTP_CONFIG_PATH` (default `/opt/sennet-agent/smtp_config.json`)
@@ -149,7 +149,7 @@ Los endpoints de escritura (`POST/PUT/DELETE/run` y SMTP `PUT/test`) requieren `
 - `POST /v1/scheduler/tasks`: crea tarea.
 - `PUT /v1/scheduler/tasks/{task_id}`: actualiza o habilita/deshabilita.
 - `DELETE /v1/scheduler/tasks/{task_id}`: elimina tarea.
-- `POST /v1/scheduler/tasks/{task_id}/run`: ejecuta tarea oneshot.
+- `POST /v1/scheduler/tasks/{task_id}/run`: ejecuta tarea completa (resuelve rango/alcance/precio, genera PDF y envía email).
 - `GET /v1/scheduler/smtp`: devuelve SMTP con password enmascarado.
 - `PUT /v1/scheduler/smtp`: guarda SMTP (`password` vacío mantiene el actual).
 - `POST /v1/scheduler/smtp/test`: correo de prueba.
@@ -193,8 +193,7 @@ python scripts/smoke_test_scheduler_api.py \
   --tenant <tenant> --client <client> --site <site> --device <device> --email test@example.com
 ```
 
-### Rollback sin romper Streamlit
+### Nota de operación
 
-1. Mantener `scheduled_tasks.json` y `smtp_config.json` en `/opt/sennet-agent/`.
-2. Si desactivas el portal o API nueva, Streamlit + cron siguen leyendo los mismos JSON.
-3. Revertir deployment de portal/API no requiere migración de datos.
+- El scheduler moderno debe ejecutarse vía FastAPI (`/v1/scheduler/*`) como camino operativo único.
+- Streamlit/cron quedan como legado y no deben ser la vía de negocio en producción para resolución de alcance/rango/envío.

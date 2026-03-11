@@ -312,7 +312,9 @@ export default function ProgramadorPage() {
     try {
       const result = await schedulerRunTask(token, taskId);
       window.open(downloadUrl(result.pdf_path), "_blank");
-      setOkMsg(`Ejecución OK: ${result.filename}`);
+      const recipients = result.email_recipients?.length ? result.email_recipients.join(", ") : "sin destinatarios";
+      const delivery = result.email_sent ? "Email enviado" : "Email no enviado";
+      setOkMsg(`Ejecución OK: ${result.filename}. ${delivery} (${recipients}). ${result.email_detail || ""}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo ejecutar");
     }
@@ -661,7 +663,7 @@ export default function ProgramadorPage() {
               <tr>
                 <th className="px-3 py-2">Nombre</th>
                 <th className="px-3 py-2">Instalación</th>
-                <th className="px-3 py-2">Dispositivo principal</th>
+                <th className="px-3 py-2">Dispositivos / alcance</th>
                 <th className="px-3 py-2">Periodo</th>
                 <th className="px-3 py-2">Programación</th>
                 <th className="px-3 py-2">Destinatarios</th>
@@ -674,7 +676,20 @@ export default function ProgramadorPage() {
                 <tr key={task.id} className="border-t border-slate-800 align-top">
                   <td className="px-3 py-2">{task.name || "Sin nombre"}</td>
                   <td className="px-3 py-2">{task.site}</td>
-                  <td className="px-3 py-2">{task.device}</td>
+                  <td className="px-3 py-2">
+                    <div className="space-y-1">
+                      <div><strong>Principal:</strong> {task.device}</div>
+                      {task.serial ? <div className="text-xs text-slate-300"><strong>Serial:</strong> {task.serial}</div> : null}
+                      {task.extra_devices?.length ? (
+                        <div className="text-xs text-slate-300" title={task.extra_devices.join(", ")}>
+                          <strong>Extra:</strong> {task.extra_devices.join(", ")}
+                        </div>
+                      ) : null}
+                      <div className="text-xs text-slate-400">
+                        Alcance esperado: {task.tenant_alias} / {task.client} / {task.site}{task.serial ? ` / ${task.serial}` : ""}
+                      </div>
+                    </div>
+                  </td>
                   <td className="px-3 py-2">{toHumanRange(task.report_range_mode)}</td>
                   <td className="px-3 py-2">{toHumanFrequency(task)}</td>
                   <td className="px-3 py-2">{(task.emails || []).join(", ")}</td>
