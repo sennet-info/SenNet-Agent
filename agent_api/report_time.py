@@ -17,7 +17,15 @@ MODE_ALIASES = {
     "full_month": "month_to_date",
     "month_to_date": "month_to_date",
     "previous_full_month": "previous_full_month",
+    "previous_month": "previous_full_month",
+    "last_full_month": "previous_full_month",
     "custom": "custom",
+}
+
+ALIASED_DAYS = {
+    "last_7_days": 7,
+    "last_15_days": 15,
+    "last_30_days": 30,
 }
 
 
@@ -50,6 +58,13 @@ def _label_from_mode(mode: str, days: Optional[int] = None):
     return f"Últimos {safe_days} días"
 
 
+def _resolve_previous_full_month(reference: datetime) -> tuple[datetime, datetime]:
+    current_month_start = reference.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    prev_month_last_instant = current_month_start - timedelta(seconds=1)
+    prev_month_start = prev_month_last_instant.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return prev_month_start, prev_month_last_instant
+
+
 def resolve_report_time(payload: Any, now: Optional[datetime] = None) -> ResolvedReportTime:
     reference = now or datetime.now().astimezone()
     tzinfo = reference.tzinfo
@@ -68,12 +83,7 @@ def resolve_report_time(payload: Any, now: Optional[datetime] = None) -> Resolve
     elif mode == "last_n_days":
         days = getattr(payload, "last_days", None)
         if days is None:
-            if raw_mode == "last_7_days":
-                days = 7
-            elif raw_mode == "last_15_days":
-                days = 15
-            elif raw_mode == "last_30_days":
-                days = 30
+            days = ALIASED_DAYS.get(raw_mode or "")
         if not days:
             range_flux = (getattr(payload, "range_flux", "") or "").strip()
             if range_flux.endswith("d") and range_flux[:-1].isdigit():
@@ -82,12 +92,19 @@ def resolve_report_time(payload: Any, now: Optional[datetime] = None) -> Resolve
         start_dt = reference - timedelta(days=safe_days)
         end_dt = reference
         resolved_mode = "last_n_days"
-        criteria = {"days": safe_days}
+        criteria = {"days": safe_days, "source_mode": raw_mode or "last_n_days"}
         adjusted = safe_days != days
+    elif mode == "previous_full_month":
+        start_dt, end_dt = _resolve_previous_full_month(reference)
+        resolved_mode = mode
+        criteria = {
+            "semantic": mode,
+            "year": start_dt.year,
+            "month": start_dt.month,
+        }
+        adjusted = False
     else:
         start_dt, end_dt = compute_report_range(mode, reference)
-        if mode == "previous_full_month":
-            end_dt = end_dt - timedelta(seconds=1)
         resolved_mode = mode
         criteria = {"semantic": mode}
         adjusted = False

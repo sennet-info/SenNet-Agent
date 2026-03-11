@@ -87,6 +87,14 @@ def main():
             if (end_dt - start_dt).days != 30:
                 raise AssertionError(f"rango incorrecto para last_30_days: {(end_dt - start_dt).days} días")
 
+        if args.range_mode == "previous_full_month":
+            start_dt = datetime.fromisoformat(debug["start_dt"])
+            end_dt = datetime.fromisoformat(debug["end_dt"])
+            if start_dt.day != 1 or start_dt.hour != 0 or start_dt.minute != 0 or start_dt.second != 0:
+                raise AssertionError(f"inicio previous_full_month inválido: {start_dt.isoformat()}")
+            if end_dt.day < 28 or end_dt.hour != 23 or end_dt.minute != 59 or end_dt.second != 59:
+                raise AssertionError(f"fin previous_full_month inválido: {end_dt.isoformat()}")
+
         if args.extra_device:
             resolved = set(debug.get("resolved_devices") or [])
             discarded = {item.get("device") for item in (debug.get("discarded_devices") or []) if isinstance(item, dict)}
