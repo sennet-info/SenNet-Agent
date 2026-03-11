@@ -64,6 +64,11 @@ export type SchedulerTask = SchedulerTaskPayload & {
   id: string;
   tenant_alias?: string;
   created_at?: string;
+  expected_pricing?: {
+    price: number;
+    source: PriceSource;
+    matched_key?: string | null;
+  };
 };
 
 export type SmtpConfigPayload = {
@@ -108,7 +113,16 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
 
 export async function getHealth() {
   const response = await fetch(buildUrl("/v1/health"), { cache: "no-store" });
-  return parseJsonResponse<{ ok: boolean }>(response);
+  return parseJsonResponse<{
+    ok: boolean;
+    runtime?: {
+      build?: string;
+      branch?: string;
+      commit?: string;
+      dirty?: string;
+      started_at?: string;
+    };
+  }>(response);
 }
 
 export async function discoveryClients(tenant: string) {
@@ -218,7 +232,18 @@ export async function schedulerRunTask(token: string, taskId: string) {
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({}),
   });
-  return parseJsonResponse<{ ok: boolean; pdf_path: string; filename: string; debug?: unknown }>(response);
+  return parseJsonResponse<{
+    ok: boolean;
+    pdf_path: string;
+    filename: string;
+    debug?: unknown;
+    email_sent?: boolean;
+    email_recipients?: string[];
+    email_detail?: string;
+    resolved_devices?: string[];
+    discarded_devices?: Array<{ device: string; reason: string }>;
+    runtime?: { build?: string; branch?: string; commit?: string; dirty?: string; started_at?: string };
+  }>(response);
 }
 
 export async function schedulerGetSmtp(token: string) {

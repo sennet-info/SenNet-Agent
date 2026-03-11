@@ -52,11 +52,16 @@ if [ -f "$REPO_DIR/requirements.txt" ]; then
   "$VENV/bin/pip" install -r "$REPO_DIR/requirements.txt"
 fi
 
-echo "==> Install systemd service"
-sudo cp "$REPO_DIR/systemd/sennet-agent.service" /etc/systemd/system/sennet-agent.service
+echo "==> Install API systemd service"
+sudo cp "$REPO_DIR/systemd/sennet-agent-api.service" /etc/systemd/system/sennet-agent-api.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now sennet-agent.service
-sudo systemctl restart sennet-agent.service
+sudo systemctl enable --now sennet-agent-api.service
+sudo systemctl restart sennet-agent-api.service
+
+# Streamlit queda opcional/legacy (no operativo para scheduler)
+if [ -f "$REPO_DIR/systemd/sennet-agent.service" ]; then
+  sudo cp "$REPO_DIR/systemd/sennet-agent.service" /etc/systemd/system/sennet-agent.service
+fi
 
 echo "==> Install cron"
 sudo cp "$REPO_DIR/cron/sennet-agent.cron" /etc/cron.d/sennet-agent
@@ -93,7 +98,7 @@ else
 fi
 
 echo "==> Done"
-systemctl --no-pager --full status sennet-agent.service || true
+systemctl --no-pager --full status sennet-agent-api.service || true
 if systemctl list-unit-files | grep -q '^sennet-portal.service'; then
   systemctl --no-pager --full status sennet-portal.service || true
 fi
