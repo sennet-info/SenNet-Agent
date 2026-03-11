@@ -8,6 +8,7 @@ import {
   discoverySerials,
   discoverySites,
   downloadUrl,
+  getHealth,
   SchedulerTask,
   schedulerCreateTask,
   schedulerDeleteTask,
@@ -70,6 +71,7 @@ export default function ProgramadorPage() {
   const [error, setError] = useState("");
   const [okMsg, setOkMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [runtime, setRuntime] = useState<{ build?: string; branch?: string; commit?: string; dirty?: string; started_at?: string } | null>(null);
 
   const [tenantOptions, setTenantOptions] = useState<string[]>([]);
   const [clients, setClients] = useState<string[]>([]);
@@ -112,15 +114,17 @@ export default function ProgramadorPage() {
     setBusy(true);
     setError("");
     try {
-      const [tenantRes, tasksRes, smtpRes] = await Promise.all([
+      const [tenantRes, tasksRes, smtpRes, healthRes] = await Promise.all([
         adminListTenants(adminToken),
         schedulerListTasks(adminToken),
         schedulerGetSmtp(adminToken),
+        getHealth(),
       ]);
       const aliases = Object.keys(tenantRes.items);
       setTenantOptions(aliases);
       setTasks(tasksRes.items);
       setSmtp({ ...EMPTY_SMTP, ...smtpRes.item });
+      setRuntime(healthRes.runtime || null);
       if (!form.tenant && aliases.length) setForm((prev) => ({ ...prev, tenant: aliases[0] }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudieron cargar datos");
@@ -314,10 +318,12 @@ export default function ProgramadorPage() {
       window.open(downloadUrl(result.pdf_path), "_blank");
       const recipients = (result.email_recipients || []).join(", ");
       const discarded = (result.discarded_devices || []).map((item) => `${item.device} (${item.reason})`).join(", ");
+      const runRuntime = (result as { runtime?: { build?: string; branch?: string; commit?: string } }).runtime;
       setOkMsg(
         `Ejecución completa OK: ${result.filename} · email_sent=${result.email_sent ? "sí" : "no"}` +
           `${recipients ? ` · destinatarios: ${recipients}` : ""}` +
-          `${discarded ? ` · descartados: ${discarded}` : ""}`,
+          `${discarded ? ` · descartados: ${discarded}` : ""}` +
+          `${runRuntime?.commit ? ` · commit=${runRuntime.commit}` : ""}`,
       );
       await initialLoad(token);
     } catch (err) {
@@ -367,6 +373,11 @@ export default function ProgramadorPage() {
   return (
     <section className="space-y-6">
       <h2 className="text-3xl font-semibold tracking-tight">Programador de tareas automáticas</h2>
+      {runtime && (
+        <p className="mt-2 text-xs text-slate-400">
+          API build: <span className="font-mono">{runtime.build}</span> · branch: <span className="font-mono">{runtime.branch}</span> · commit: <span className="font-mono">{runtime.commit}</span> · dirty: <span className="font-mono">{runtime.dirty}</span>
+        </p>
+      )}
 
       <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
         <label className="mb-2 block text-sm text-slate-300">Token admin (Bearer)</label>

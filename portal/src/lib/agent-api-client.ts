@@ -113,7 +113,16 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
 
 export async function getHealth() {
   const response = await fetch(buildUrl("/v1/health"), { cache: "no-store" });
-  return parseJsonResponse<{ ok: boolean }>(response);
+  return parseJsonResponse<{
+    ok: boolean;
+    runtime?: {
+      build?: string;
+      branch?: string;
+      commit?: string;
+      dirty?: string;
+      started_at?: string;
+    };
+  }>(response);
 }
 
 export async function discoveryClients(tenant: string) {
@@ -233,6 +242,7 @@ export async function schedulerRunTask(token: string, taskId: string) {
     email_detail?: string;
     resolved_devices?: string[];
     discarded_devices?: Array<{ device: string; reason: string }>;
+    runtime?: { build?: string; branch?: string; commit?: string; dirty?: string; started_at?: string };
   }>(response);
 }
 

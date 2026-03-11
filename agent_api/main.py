@@ -37,6 +37,7 @@ from agent_api.scheduler_store import list_tasks, mask_smtp, save_tasks, smtp_st
 from agent_api.scheduler_executor import claim_task_run, execute_scheduled_task, finish_task_run, run_due_scheduler_tasks
 from agent_api.report_time import resolve_report_time
 from agent_api.pricing import get_pricing_config, resolve_default_price
+from agent_api.versioning import get_runtime_version
 
 if str(APP_DIR) not in sys.path:
     sys.path.append(str(APP_DIR))
@@ -77,7 +78,7 @@ def _require_admin_for_smtp_read(authorization: Optional[str] = Header(default=N
 
 @app.get("/v1/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "runtime": get_runtime_version()}
 
 
 def _tenant_auth_or_404(tenant: str):
@@ -405,7 +406,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
             force_recalculate=payload.force_recalculate,
         )
         finish_task_run(task_id, run_id, result, None)
-        return result
+        return {**result, "runtime": get_runtime_version()}
     except Exception as exc:
         finish_task_run(task_id, run_id, None, str(exc))
         raise
@@ -413,7 +414,8 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
 
 @app.post("/v1/scheduler/run-due", dependencies=[Depends(_require_admin_token)])
 async def scheduler_run_due_tasks():
-    return await run_due_scheduler_tasks()
+    result = await run_due_scheduler_tasks()
+    return {**result, "runtime": get_runtime_version()}
 
 
 @app.get("/v1/scheduler/smtp", dependencies=[Depends(_require_admin_for_smtp_read)])

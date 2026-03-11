@@ -32,7 +32,8 @@ def main() -> int:
         with request.urlopen(req, timeout=120) as resp:
             payload = json.loads(resp.read().decode("utf-8") or "{}")
             processed = payload.get("processed", 0)
-            log_cron("SCHEDULER_API_TICK_OK", processed=processed)
+            runtime = payload.get("runtime") or {}
+            log_cron("SCHEDULER_API_TICK_OK", processed=processed, build=runtime.get("build"), branch=runtime.get("branch"), commit=runtime.get("commit"))
             for item in payload.get("items", []):
                 log_cron("SCHEDULER_TASK_RESULT", **item)
             return 0

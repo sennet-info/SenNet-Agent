@@ -14,6 +14,7 @@ from agent_api.config import APP_DIR, get_tenant_auth, safe_output_path
 from agent_api.pricing import resolve_default_price
 from agent_api.report_time import resolve_report_time
 from agent_api.scheduler_store import list_tasks, scheduler_tasks_store, smtp_store
+from agent_api.versioning import get_runtime_version
 from core.discovery import list_devices
 from core.report import generate_report_pdf
 from modules.email_sender import EmailSender
@@ -213,6 +214,7 @@ async def execute_scheduled_task(
             "task_report_range_mode": task.get("report_range_mode"),
         },
         "trigger_source": trigger_source,
+        "runtime": get_runtime_version(),
     }
 
     debug_file = safe_output_path(f"{safe_path.stem}.scheduler.debug.json")
@@ -253,6 +255,7 @@ async def execute_scheduled_task(
         "start_dt": _iso(resolved_time.start_dt),
         "end_dt": _iso(resolved_time.end_dt),
         "range_flux": resolved_time.range_flux,
+        "runtime": get_runtime_version(),
     }
 
 
