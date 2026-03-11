@@ -58,6 +58,7 @@ def main():
         resolved_range = debug.get("resolved_range") or {}
         device_scope = debug.get("device_scope") or {}
         pricing = debug.get("pricing") or {}
+        audit = debug.get("audit") or {}
 
         assert_true(run_resp.get("ok") is True, "run: expected ok=true")
         assert_true(run_resp.get("email_sent") is True, "run: expected email_sent=true")
@@ -65,11 +66,14 @@ def main():
         assert_true(resolved_range.get("range_mode") == "last_n_days", "resolved_range.range_mode must be last_n_days")
         assert_true((resolved_range.get("criteria") or {}).get("days") == 30, "resolved_range.criteria.days must be 30")
         assert_true(device_scope.get("requested_device") == args.device, "device_scope.requested_device mismatch")
+        assert_true(isinstance(device_scope.get("requested_devices_all"), list), "device_scope.requested_devices_all must be list")
         assert_true(isinstance(device_scope.get("resolved_devices"), list), "device_scope.resolved_devices must be list")
         assert_true("price_effective" in pricing, "pricing.price_effective missing")
         assert_true("price_source" in pricing, "pricing.price_source missing")
         assert_true("price_scope" in pricing, "pricing.price_scope missing")
         assert_true("price_scope_matched_key" in pricing, "pricing.price_scope_matched_key missing")
+        assert_true("price_applied_in_report" in audit, "audit.price_applied_in_report missing")
+        assert_true(audit.get("price_matches_report") in {True, None}, "audit.price_matches_report should be true when available")
         print("Scheduler smoke assertions OK")
     finally:
         call("DELETE", f"{base}/v1/scheduler/tasks/{task_id}", token=args.admin_token)

@@ -95,7 +95,7 @@ def _resolve_task_devices(auth_config, task: dict) -> tuple[list[str], dict]:
         "requested_device": task.get("device"),
         "requested_extra_devices": task.get("extra_devices", []),
         "requested_serial": task.get("serial"),
-        "requested_devices": requested,
+        "requested_devices_all": requested,
         "resolved_devices": resolved,
         "discarded_devices": discarded,
         "discard_reasons": discard_reasons,
@@ -465,23 +465,23 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     async def _build():
         return await asyncio.to_thread(
             generate_report_pdf,
-            auth_config,
-            task["client"],
-            task["site"],
-            devices,
-            resolved_time.range_flux,
-            effective_price,
-            task.get("serial"),
-            resolved_time.start_dt,
-            resolved_time.end_dt,
-            False,
-            None,
-            payload.max_workers,
-            payload.debug,
-            payload.debug_sample_n,
-            payload.force_recalculate,
-            resolved_time.range_mode,
-            resolved_time.range_label,
+            auth_config=auth_config,
+            client=task["client"],
+            site=task["site"],
+            devices=devices,
+            range_flux=resolved_time.range_flux,
+            price=effective_price,
+            serial=task.get("serial"),
+            start_dt=resolved_time.start_dt,
+            end_dt=resolved_time.end_dt,
+            debug_mode=False,
+            callback_status=None,
+            max_workers=payload.max_workers,
+            collect_debug=payload.debug,
+            debug_sample_n=payload.debug_sample_n,
+            force_recalculate=payload.force_recalculate,
+            range_mode=resolved_time.range_mode,
+            range_label=resolved_time.range_label,
         )
 
     original_cwd = Path.cwd()
@@ -565,6 +565,21 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "email_sent": email_sent,
         "email_recipients": recipients,
         "email_detail": email_detail,
+    }
+    report_inputs = debug_payload.get("inputs") if isinstance(debug_payload.get("inputs"), dict) else {}
+    report_price = report_inputs.get("price_applied_kwh", report_inputs.get("price"))
+    report_devices_processed = report_inputs.get("devices_processed") if isinstance(report_inputs.get("devices_processed"), list) else []
+    debug_payload["audit"] = {
+        "requested_device": device_scope_debug.get("requested_device"),
+        "requested_extra_devices": device_scope_debug.get("requested_extra_devices", []),
+        "requested_devices_all": device_scope_debug.get("requested_devices_all", []),
+        "resolved_devices": device_scope_debug.get("resolved_devices", []),
+        "discarded_devices": device_scope_debug.get("discarded_devices", []),
+        "discard_reasons": device_scope_debug.get("discard_reasons", {}),
+        "price_effective": effective_price,
+        "price_applied_in_report": report_price,
+        "price_matches_report": report_price == effective_price if isinstance(report_price, (int, float)) else None,
+        "devices_processed_in_report": report_devices_processed,
     }
 
     return {

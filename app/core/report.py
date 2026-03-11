@@ -109,6 +109,7 @@ def generate_report_pdf(
     stats_by_series = {}
     sample_rows = {}
     warnings = []
+    processed_devices = []
 
     def _to_df(frame):
         if isinstance(frame, list):
@@ -205,6 +206,8 @@ def generate_report_pdf(
             try:
                 result = _process_device_period(dev_name, period)
                 timings["fetch"] += result["fetch_elapsed"]
+                if result["device"] not in processed_devices:
+                    processed_devices.append(result["device"])
                 _collect_series_stats(result["device"], result["df_daily"])
                 _collect_series_stats(result["device"], result["df_raw"])
                 if result["kpis"]:
@@ -233,6 +236,8 @@ def generate_report_pdf(
                 try:
                     result = future.result()
                     timings["fetch"] += result["fetch_elapsed"]
+                    if result["device"] not in processed_devices:
+                        processed_devices.append(result["device"])
                     _collect_series_stats(result["device"], result["df_daily"])
                     _collect_series_stats(result["device"], result["df_raw"])
                     if result["kpis"]:
@@ -305,8 +310,10 @@ def generate_report_pdf(
                     "site": site,
                     "serial": serial,
                     "devices": devices,
+                    "devices_processed": processed_devices,
                     "range_flux": range_flux,
                     "price": price,
+                    "price_applied_kwh": price,
                     "max_workers": max_workers,
                     "force_recalculate": force_recalculate,
                 },
