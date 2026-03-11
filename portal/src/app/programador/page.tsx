@@ -661,7 +661,7 @@ export default function ProgramadorPage() {
               <tr>
                 <th className="px-3 py-2">Nombre</th>
                 <th className="px-3 py-2">Instalación</th>
-                <th className="px-3 py-2">Dispositivo principal</th>
+                <th className="px-3 py-2">Alcance</th>
                 <th className="px-3 py-2">Periodo</th>
                 <th className="px-3 py-2">Programación</th>
                 <th className="px-3 py-2">Destinatarios</th>
@@ -674,7 +674,16 @@ export default function ProgramadorPage() {
                 <tr key={task.id} className="border-t border-slate-800 align-top">
                   <td className="px-3 py-2">{task.name || "Sin nombre"}</td>
                   <td className="px-3 py-2">{task.site}</td>
-                  <td className="px-3 py-2">{task.device}</td>
+                  <td className="px-3 py-2">
+                    <div className="font-medium">{task.device}</div>
+                    {task.serial && <div className="text-xs text-slate-400">Serial: {task.serial}</div>}
+                    {!!task.extra_devices?.length && <div className="text-xs text-slate-400">Extras: {task.extra_devices.join(", ")}</div>}
+                    {task.expected_pricing && (
+                      <div className="text-xs text-blue-300">
+                        Tarifa resuelta esperada: {task.expected_pricing.source} · {task.expected_pricing.matched_key ?? "fallback"} · {task.expected_pricing.price} €/kWh
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-2">{toHumanRange(task.report_range_mode)}</td>
                   <td className="px-3 py-2">{toHumanFrequency(task)}</td>
                   <td className="px-3 py-2">{(task.emails || []).join(", ")}</td>

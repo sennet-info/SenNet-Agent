@@ -34,6 +34,7 @@ from agent_api.schemas import (
     TenantUpsertRequest,
 )
 from agent_api.scheduler_store import list_tasks, mask_smtp, save_tasks, smtp_store
+from agent_api.scheduler_executor import claim_task_run, execute_scheduled_task, finish_task_run, run_due_scheduler_tasks
 from agent_api.report_time import resolve_report_time
 from agent_api.pricing import get_pricing_config, resolve_default_price
 
@@ -43,7 +44,6 @@ if str(APP_DIR) not in sys.path:
 from core.discovery import list_clients, list_devices, list_serials, list_sites
 from core.report import generate_report_pdf
 from modules.email_sender import EmailSender
-from modules.report_range import compute_report_range, to_flux_range
 
 MAX_DEVICES = 50
 REPORT_TIMEOUT_SECONDS = 180
@@ -309,6 +309,13 @@ def scheduler_list_tasks():
     for task in list_tasks():
         clean = dict(task)
         clean.pop("influx_token", None)
+        price, source, matched_key = resolve_default_price(
+            tenant=clean.get("tenant_alias") or clean.get("tenant"),
+            client=clean.get("client"),
+            site=clean.get("site"),
+            serial=clean.get("serial"),
+        )
+        clean["expected_pricing"] = {"price": price, "source": source, "matched_key": matched_key}
         tasks.append(clean)
     return {"items": tasks}
 
@@ -376,91 +383,37 @@ def scheduler_delete_task(task_id: str):
 
 @app.post("/v1/scheduler/tasks/{task_id}/run", dependencies=[Depends(_require_admin_token)])
 async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(default=SchedulerRunRequest())):
-    task = next((item for item in list_tasks() if item.get("id") == task_id), None)
+    claim = claim_task_run(task_id, source="manual", only_if_due=False)
+    if not claim.get("ok"):
+        if claim.get("reason") == "task_not_found":
+            raise HTTPException(status_code=404, detail="Tarea no encontrada")
+        raise HTTPException(status_code=409, detail=f"No se pudo reclamar ejecución: {claim.get('reason')}")
+
+    run_id = claim["run_id"]
+    task = claim.get("task") or next((item for item in list_tasks() if item.get("id") == task_id), None)
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
 
-    devices = [task["device"], *task.get("extra_devices", [])]
-    if len(devices) > MAX_DEVICES:
-        raise HTTPException(status_code=422, detail=f"devices excede el máximo permitido ({MAX_DEVICES})")
-
-    start_dt = None
-    end_dt = None
-    range_flux = task.get("range_flux")
-    if not range_flux:
-        if task.get("start_dt") and task.get("end_dt"):
-            start_dt = datetime.fromisoformat(task["start_dt"])
-            end_dt = datetime.fromisoformat(task["end_dt"])
-        else:
-            start_dt, end_dt = compute_report_range(task.get("report_range_mode"))
-        range_flux = to_flux_range(start_dt, end_dt)
-
-    auth_config = _tenant_auth_or_404(task["tenant_alias"])
-    effective_price, price_source, price_match_key = resolve_default_price(
-        tenant=task.get("tenant_alias"),
-        client=task.get("client"),
-        site=task.get("site"),
-        serial=task.get("serial"),
-    )
-
-    async def _build():
-        return await asyncio.to_thread(
-            generate_report_pdf,
-            auth_config,
-            task["client"],
-            task["site"],
-            devices,
-            range_flux,
-            effective_price,
-            task.get("serial"),
-            start_dt,
-            end_dt,
-            False,
-            None,
-            payload.max_workers,
-            payload.debug,
-            payload.debug_sample_n,
-            payload.force_recalculate,
-        )
-
-    original_cwd = Path.cwd()
     try:
-        os.chdir(APP_DIR)
-        build_result = await asyncio.wait_for(_build(), timeout=SCHEDULER_RUN_TIMEOUT_SECONDS)
-    except TimeoutError as exc:
-        raise HTTPException(status_code=504, detail="Timeout ejecutando tarea") from exc
-    finally:
-        os.chdir(original_cwd)
+        result = await execute_scheduled_task(
+            task,
+            trigger_source="manual",
+            debug=payload.debug,
+            send_email=True,
+            max_workers=payload.max_workers,
+            debug_sample_n=payload.debug_sample_n,
+            force_recalculate=payload.force_recalculate,
+        )
+        finish_task_run(task_id, run_id, result, None)
+        return result
+    except Exception as exc:
+        finish_task_run(task_id, run_id, None, str(exc))
+        raise
 
-    if payload.debug:
-        pdf_path, debug_payload = build_result
-    else:
-        pdf_path = build_result
-        debug_payload = None
 
-    if not pdf_path:
-        raise HTTPException(status_code=500, detail="No se pudo generar el PDF")
-
-    safe_path = safe_output_path(pdf_path)
-    if not safe_path.exists():
-        raise HTTPException(status_code=500, detail="PDF generado no encontrado en disco")
-
-    if isinstance(debug_payload, dict):
-        debug_payload.setdefault("pricing", {})
-        debug_payload["pricing"].update({
-            "price_effective": effective_price,
-            "price_source": price_source,
-            "price_override": False,
-            "price_scope": {
-                "tenant": task.get("tenant_alias"),
-                "client": task.get("client"),
-                "site": task.get("site"),
-                "serial": task.get("serial"),
-            },
-            "price_scope_matched_key": price_match_key,
-        })
-
-    return {"ok": True, "pdf_path": str(safe_path), "filename": safe_path.name, "debug": debug_payload}
+@app.post("/v1/scheduler/run-due", dependencies=[Depends(_require_admin_token)])
+async def scheduler_run_due_tasks():
+    return await run_due_scheduler_tasks()
 
 
 @app.get("/v1/scheduler/smtp", dependencies=[Depends(_require_admin_for_smtp_read)])

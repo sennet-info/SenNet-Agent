@@ -64,6 +64,11 @@ export type SchedulerTask = SchedulerTaskPayload & {
   id: string;
   tenant_alias?: string;
   created_at?: string;
+  expected_pricing?: {
+    price: number;
+    source: PriceSource;
+    matched_key?: string | null;
+  };
 };
 
 export type SmtpConfigPayload = {
