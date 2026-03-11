@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import copy
 import json
 from datetime import datetime
 
@@ -34,9 +35,20 @@ def main():
     parser.add_argument("--device", required=True)
     parser.add_argument("--extra-device", action="append", default=[])
     parser.add_argument("--email", required=True)
+    parser.add_argument("--serial-price", type=float, default=None, help="If provided, set this serial price during test and verify it is applied")
     args = parser.parse_args()
 
     base = args.base_url.rstrip("/")
+
+    original_pricing = None
+    if args.serial and args.serial_price is not None:
+        original_pricing = call("GET", f"{base}/v1/pricing/defaults", token=args.admin_token).get("item") or {}
+        patched = copy.deepcopy(original_pricing)
+        patched.setdefault("scopes", {})
+        patched["scopes"].setdefault("serial", {})
+        patched["scopes"]["serial"][args.serial] = args.serial_price
+        call("POST", f"{base}/v1/pricing/defaults", token=args.admin_token, json=patched)
+
     payload = {
         "tenant": args.tenant,
         "client": args.client,
@@ -74,9 +86,28 @@ def main():
         assert_true("price_scope_matched_key" in pricing, "pricing.price_scope_matched_key missing")
         assert_true("price_applied_in_report" in audit, "audit.price_applied_in_report missing")
         assert_true(audit.get("price_matches_report") in {True, None}, "audit.price_matches_report should be true when available")
+
+        if args.extra_device:
+            expected = {args.device, *args.extra_device}
+            requested = set(device_scope.get("requested_devices_all") or [])
+            assert_true(expected.issubset(requested), "expected requested_devices_all to include primary + extras")
+            processed = set(audit.get("devices_processed_in_report") or [])
+            resolved = set(device_scope.get("resolved_devices") or [])
+            assert_true(processed.issubset(resolved), "processed devices must be subset of resolved_devices")
+
+        if args.serial and args.serial_price is not None:
+            assert_true(pricing.get("price_source") == "serial", "pricing.price_source should be serial")
+            assert_true(pricing.get("price_scope_matched_key") == args.serial, "pricing.price_scope_matched_key should match serial")
+            assert_true(abs(float(pricing.get("price_effective")) - args.serial_price) < 1e-9, "pricing.price_effective mismatch")
+            report_price = audit.get("price_applied_in_report")
+            assert_true(isinstance(report_price, (int, float)), "audit.price_applied_in_report should be numeric")
+            assert_true(abs(float(report_price) - args.serial_price) < 1e-9, "audit.price_applied_in_report mismatch")
+
         print("Scheduler smoke assertions OK")
     finally:
         call("DELETE", f"{base}/v1/scheduler/tasks/{task_id}", token=args.admin_token)
+        if original_pricing is not None:
+            call("POST", f"{base}/v1/pricing/defaults", token=args.admin_token, json=original_pricing)
 
     print(f"Smoke scheduler OK at {datetime.now().isoformat(timespec='seconds')}")
 

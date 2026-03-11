@@ -82,11 +82,12 @@ def _resolve_task_devices(auth_config, task: dict) -> tuple[list[str], dict]:
         task.get("site", ""),
         serial=task.get("serial"),
     )
-    discovered_set = set(discovered)
+    discovered_index = {(item or "").strip().casefold(): item for item in discovered if (item or "").strip()}
     resolved = []
     for item in requested:
-        if item in discovered_set:
-            resolved.append(item)
+        normalized = item.strip().casefold()
+        if normalized in discovered_index:
+            resolved.append(discovered_index[normalized])
         else:
             discarded.append(item)
             discard_reasons[item] = "not_in_discovery_scope"
@@ -108,6 +109,7 @@ def _resolve_task_devices(auth_config, task: dict) -> tuple[list[str], dict]:
         },
     }
     return resolved, scope_debug
+
 
 
 def _require_admin_token(authorization: Optional[str] = Header(default=None)):
@@ -569,6 +571,16 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     report_inputs = debug_payload.get("inputs") if isinstance(debug_payload.get("inputs"), dict) else {}
     report_price = report_inputs.get("price_applied_kwh", report_inputs.get("price"))
     report_devices_processed = report_inputs.get("devices_processed") if isinstance(report_inputs.get("devices_processed"), list) else []
+    report_devices_with_kpis = report_inputs.get("devices_with_kpis") if isinstance(report_inputs.get("devices_with_kpis"), list) else []
+    report_devices_without_data = report_inputs.get("devices_without_data") if isinstance(report_inputs.get("devices_without_data"), list) else []
+
+    unresolved_after_build = [dev for dev in devices if dev not in report_devices_processed]
+    if unresolved_after_build:
+        for item in unresolved_after_build:
+            device_scope_debug["discard_reasons"].setdefault(item, "not_processed_in_report")
+            if item not in device_scope_debug["discarded_devices"]:
+                device_scope_debug["discarded_devices"].append(item)
+
     debug_payload["audit"] = {
         "requested_device": device_scope_debug.get("requested_device"),
         "requested_extra_devices": device_scope_debug.get("requested_extra_devices", []),
@@ -580,6 +592,8 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "price_applied_in_report": report_price,
         "price_matches_report": report_price == effective_price if isinstance(report_price, (int, float)) else None,
         "devices_processed_in_report": report_devices_processed,
+        "devices_with_kpis": report_devices_with_kpis,
+        "devices_without_data": report_devices_without_data,
     }
 
     return {

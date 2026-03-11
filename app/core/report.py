@@ -110,6 +110,8 @@ def generate_report_pdf(
     sample_rows = {}
     warnings = []
     processed_devices = []
+    devices_with_kpis = set()
+    devices_without_data = set()
 
     def _to_df(frame):
         if isinstance(frame, list):
@@ -179,7 +181,8 @@ def generate_report_pdf(
 
         analysis_elapsed = 0.0
         kpis = []
-        if not df_daily.empty or not df_raw.empty:
+        has_data = not df_daily.empty or not df_raw.empty
+        if has_data:
             analysis_start = time.perf_counter()
             kpis = Analyzer.analyze_device_dual(df_daily, df_raw, dev_name, price) or []
             analysis_elapsed = time.perf_counter() - analysis_start
@@ -188,6 +191,7 @@ def generate_report_pdf(
             "device": dev_name,
             "section": section_name,
             "kpis": kpis,
+            "has_data": has_data,
             "fetch_elapsed": fetch_elapsed,
             "analysis_elapsed": analysis_elapsed,
             "df_daily": df_daily,
@@ -211,10 +215,14 @@ def generate_report_pdf(
                 _collect_series_stats(result["device"], result["df_daily"])
                 _collect_series_stats(result["device"], result["df_raw"])
                 if result["kpis"]:
+                    devices_with_kpis.add(dev_name)
                     for kpi in result["kpis"]:
                         key = f"{dev_name} {kpi.get('suffix_name', '')}".strip()
                         final_report_data[result["section"]][key] = kpi
-                elif len(periods) > 1:
+                else:
+                    if not result.get("has_data"):
+                        devices_without_data.add(dev_name)
+                if not result["kpis"] and len(periods) > 1:
                     final_report_data[result["section"]][f"{dev_name} (Resumen)"] = {
                         "main_value": "Sin datos para este periodo",
                         "secondary_value": "",
@@ -241,10 +249,14 @@ def generate_report_pdf(
                     _collect_series_stats(result["device"], result["df_daily"])
                     _collect_series_stats(result["device"], result["df_raw"])
                     if result["kpis"]:
+                        devices_with_kpis.add(dev_name)
                         for kpi in result["kpis"]:
                             key = f"{dev_name} {kpi.get('suffix_name', '')}".strip()
                             final_report_data[result["section"]][key] = kpi
-                    elif len(periods) > 1:
+                    else:
+                        if not result.get("has_data"):
+                            devices_without_data.add(dev_name)
+                    if not result["kpis"] and len(periods) > 1:
                         final_report_data[result["section"]][f"{dev_name} (Resumen)"] = {
                             "main_value": "Sin datos para este periodo",
                             "secondary_value": "",
@@ -311,6 +323,8 @@ def generate_report_pdf(
                     "serial": serial,
                     "devices": devices,
                     "devices_processed": processed_devices,
+                    "devices_with_kpis": sorted(devices_with_kpis),
+                    "devices_without_data": sorted(devices_without_data),
                     "range_flux": range_flux,
                     "price": price,
                     "price_applied_kwh": price,
