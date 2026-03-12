@@ -21,6 +21,7 @@ def main():
     legacy_service = read("systemd/sennet-agent.service")
     cron_file = read("cron/sennet-agent.cron")
     streamlit_app = read("app/app.py")
+    legacy_oneshot = read("app/run_report_oneshot.py")
     worker_service = read("systemd/sennet-scheduler-worker.service")
 
     assert_true("sennet-agent-api.service" in deploy, "deploy must install sennet-agent-api.service")
@@ -39,6 +40,10 @@ def main():
     assert_true("DEPRECATED" in legacy_service and "ExecStart=/bin/false" in legacy_service, "legacy streamlit service must be disabled")
     assert_true("DEPRECATED" in cron_file, "legacy cron file must be deprecated")
     assert_true("st.stop()" in streamlit_app, "legacy streamlit UI must be hard-disabled")
+    assert_true("run_analysis_discovery" not in streamlit_app, "streamlit file must not contain report runtime code")
+    assert_true("EmailSender" not in streamlit_app, "streamlit file must not contain smtp runtime code")
+    assert_true("run_analysis_discovery" not in legacy_oneshot, "legacy oneshot must not run report generation")
+    assert_true("EmailSender" not in legacy_oneshot, "legacy oneshot must not send emails")
 
     print("FastAPI-only architecture validation passed")
 
