@@ -17,14 +17,14 @@ export AGENT_ADMIN_TOKEN="<token_admin>"
 ### 1) Servicio arriba
 **Comando**
 ```bash
-systemctl is-active sennet-agent.service
+systemctl is-active sennet-agent-api.service
 ```
 **OK**: devuelve `active`.
 **FAIL**: cualquier otro estado (`inactive`, `failed`, etc.).
 
 Opcional para diagnóstico:
 ```bash
-journalctl -u sennet-agent.service -n 200 --no-pager
+journalctl -u sennet-agent-api.service -n 200 --no-pager
 ```
 
 ---
@@ -90,7 +90,7 @@ Si cualquier bloque falla, el estado global es **FAIL** y se debe corregir antes
 Ejecuta en orden:
 
 ```bash
-systemctl is-active sennet-agent.service
+systemctl is-active sennet-agent-api.service
 ss -ltnp | rg ':8000'
 curl -fsS http://127.0.0.1:8000/v1/health
 curl -fsS -H "Authorization: Bearer ${AGENT_ADMIN_TOKEN}" http://127.0.0.1:8000/v1/admin/tenants

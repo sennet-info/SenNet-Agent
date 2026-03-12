@@ -642,6 +642,67 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     }
 
 
+
+
+def _scheduler_due_summary_item(task_id: str, status: str, detail: str | None = None, email_sent: bool | None = None):
+    item = {"task_id": task_id, "status": status}
+    if detail is not None:
+        item["detail"] = detail
+    if email_sent is not None:
+        item["email_sent"] = email_sent
+    return item
+
+
+@app.post("/v1/scheduler/run-due", dependencies=[Depends(_require_admin_token)])
+async def scheduler_run_due(payload: SchedulerRunRequest = Body(default=SchedulerRunRequest(debug=True))):
+    from modules.scheduler_logic import SchedulerLogic
+
+    tasks = SchedulerLogic.load_tasks()
+    results = []
+
+    for task in tasks:
+        task_id = task.get("id")
+        if not task_id:
+            continue
+        if not SchedulerLogic.should_run(task):
+            continue
+
+        claim = SchedulerLogic.claim_execution(task_id, source="cron")
+        if not claim.get("ok"):
+            results.append(_scheduler_due_summary_item(task_id, "skipped", claim.get("reason")))
+            continue
+
+        run_id = claim.get("run_id")
+        sent_ok = False
+        range_start = None
+        range_end = None
+        try:
+            run_result = await scheduler_run_task(task_id=task_id, payload=payload)
+            sent_ok = bool(run_result.get("email_sent"))
+            resolved = run_result.get("debug", {}).get("resolved_range", {}) if isinstance(run_result, dict) else {}
+            if isinstance(resolved, dict):
+                range_start = resolved.get("start")
+                range_end = resolved.get("stop")
+            results.append(_scheduler_due_summary_item(task_id, "executed", email_sent=sent_ok))
+        except HTTPException as exc:
+            results.append(_scheduler_due_summary_item(task_id, "failed", f"http_{exc.status_code}: {exc.detail}"))
+        except Exception as exc:  # noqa: BLE001
+            results.append(_scheduler_due_summary_item(task_id, "failed", str(exc)))
+        finally:
+            SchedulerLogic.finish_execution(
+                task_id,
+                run_id,
+                sent_ok=sent_ok,
+                range_start=range_start,
+                range_end=range_end,
+            )
+
+    return {
+        "ok": True,
+        "processed": len(results),
+        "results": results,
+    }
+
 @app.get("/v1/scheduler/smtp", dependencies=[Depends(_require_admin_for_smtp_read)])
 def scheduler_get_smtp():
     cfg = smtp_store().read(default={})

@@ -37,6 +37,10 @@ def render_report_range_help(selected_mode):
 
 st.set_page_config(page_title="SenNet Energy Intelligence", layout="wide", initial_sidebar_state="expanded")
 
+st.error("⚠️ Streamlit legacy desactivado: operación de informes/scheduler migrada a Portal + FastAPI.")
+st.info("Usa el portal Next.js y la API FastAPI para informes manuales y tareas automáticas.")
+st.stop()
+
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');

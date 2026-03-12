@@ -9,7 +9,7 @@
 
 ## Entrypoints
 - FastAPI API: /opt/sennet-agent/repo/agent_api/main.py (uvicorn, port 8000)
-- Scheduler worker (FastAPI-only): /opt/sennet-agent/repo/app/run_report_oneshot.py (triggered by systemd timer every minute)
+- Scheduler worker (FastAPI-only): /opt/sennet-agent/repo/agent_api/scheduler_worker.py (triggered by systemd timer every minute)
 
 ## Services
 - systemd units:

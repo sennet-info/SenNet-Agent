@@ -1,3 +1,3 @@
 # DEPRECATED: Cron legacy scheduler disabled.
 # Scheduler automation now runs via systemd timer:
-#   sennet-scheduler-worker.timer -> app/run_report_oneshot.py (FastAPI scheduler_run_task path)
+#   sennet-scheduler-worker.timer -> agent_api/scheduler_worker.py (FastAPI scheduler_run_task path)

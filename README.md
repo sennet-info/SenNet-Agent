@@ -150,6 +150,7 @@ Los endpoints de escritura (`POST/PUT/DELETE/run` y SMTP `PUT/test`) requieren `
 - `PUT /v1/scheduler/tasks/{task_id}`: actualiza o habilita/deshabilita.
 - `DELETE /v1/scheduler/tasks/{task_id}`: elimina tarea.
 - `POST /v1/scheduler/tasks/{task_id}/run`: ejecuta tarea completa (resuelve rango/alcance/precio, genera PDF y envía email).
+- `POST /v1/scheduler/run-due`: ejecuta únicamente tareas vencidas (usado por el worker systemd FastAPI-only).
 - `GET /v1/scheduler/smtp`: devuelve SMTP con password enmascarado.
 - `PUT /v1/scheduler/smtp`: guarda SMTP (`password` vacío mantiene el actual).
 - `POST /v1/scheduler/smtp/test`: correo de prueba.
@@ -196,7 +197,7 @@ python scripts/smoke_test_scheduler_api.py \
 ### Nota de operación (FastAPI-only)
 
 - El flujo productivo de informes/scheduler es único: **Portal Next.js + FastAPI**.
-- Las tareas automáticas se ejecutan por `sennet-scheduler-worker.timer` llamando internamente a `POST /v1/scheduler/tasks/{task_id}/run`.
+- Las tareas automáticas se ejecutan por `sennet-scheduler-worker.timer` ejecutando `agent_api/scheduler_worker.py`, que dispara internamente `POST /v1/scheduler/run-due` (y este usa el mismo flujo de `run` por tarea).
 - `SCHEDULED_TASKS_PATH` y `SMTP_CONFIG_PATH` son persistencia del scheduler FastAPI (no compartida con ejecutores legacy).
 - El envío de email de tareas se hace una sola vez en `scheduler_run_task` con plantilla HTML profesional.
 
