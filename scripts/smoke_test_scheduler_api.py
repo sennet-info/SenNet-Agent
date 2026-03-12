@@ -71,6 +71,7 @@ def main():
         device_scope = debug.get("device_scope") or {}
         pricing = debug.get("pricing") or {}
         audit = debug.get("audit") or {}
+        delivery = debug.get("delivery") or {}
         device_debug = audit.get("device_debug") or {}
 
         assert_true(run_resp.get("ok") is True, "run: expected ok=true")
@@ -88,6 +89,8 @@ def main():
         assert_true("price_scope" in pricing, "pricing.price_scope missing")
         assert_true("price_scope_matched_key" in pricing, "pricing.price_scope_matched_key missing")
         assert_true("price_applied_in_report" in audit, "audit.price_applied_in_report missing")
+        assert_true("final_report_data_summary" in debug, "debug.final_report_data_summary missing")
+        assert_true("same_generated_and_emailed" in delivery, "delivery.same_generated_and_emailed missing")
         assert_true("price_used_in_pdf" in audit, "audit.price_used_in_pdf missing")
         assert_true(isinstance(device_debug, dict), "audit.device_debug must be dict")
         assert_true(audit.get("price_matches_report") in {True, None}, "audit.price_matches_report should be true when available")
@@ -104,6 +107,11 @@ def main():
                 info = device_debug.get(dev) or {}
                 assert_true("daily_rows" in info and "raw_rows" in info, f"device_debug rows missing for {dev}")
                 assert_true("generated_kpis" in info, f"device_debug generated_kpis missing for {dev}")
+                assert_true("energy_columns_detected" in info, f"device_debug energy_columns_detected missing for {dev}")
+                assert_true("energy_column_selected" in info, f"device_debug energy_column_selected missing for {dev}")
+                assert_true("total_energy_computed" in info, f"device_debug total_energy_computed missing for {dev}")
+                assert_true("cost_computed" in info, f"device_debug cost_computed missing for {dev}")
+                assert_true("generated_kpis_count" in info and "generated_kpis_keys" in info, f"device_debug generated_kpis summary missing for {dev}")
 
         if args.serial and args.serial_price is not None:
             assert_true(pricing.get("price_source") == "serial", "pricing.price_source should be serial")
@@ -115,6 +123,8 @@ def main():
             assert_true(isinstance(pdf_price, (int, float)), "audit.price_used_in_pdf should be numeric")
             assert_true(abs(float(report_price) - args.serial_price) < 1e-9, "audit.price_applied_in_report mismatch")
             assert_true(abs(float(pdf_price) - args.serial_price) < 1e-9, "audit.price_used_in_pdf mismatch")
+            same_pdf = delivery.get("same_generated_and_emailed")
+            assert_true(same_pdf in {True, None}, "delivery.same_generated_and_emailed should be true when email sent")
 
 
         debug_only = call("POST", f"{base}/v1/scheduler/tasks/{task_id}/debug", token=args.admin_token, json={"debug": True})

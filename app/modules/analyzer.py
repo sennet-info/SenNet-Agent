@@ -11,6 +11,34 @@ class Analyzer:
         except: pass
         return {}
 
+
+
+    @staticmethod
+    def select_primary_energy_column(columns):
+        if not columns:
+            return None
+        cols = [c for c in columns if isinstance(c, str)]
+        if not cols:
+            return None
+
+        exact_priority = ["ENEact", "active_energy", "ENEactTot", "ENEactTOTAL"]
+        lowered = {c.lower(): c for c in cols}
+        for key in exact_priority:
+            if key.lower() in lowered:
+                return lowered[key.lower()]
+
+        # Prefer total-like names over phase-like names
+        totals = [c for c in cols if any(k in c.lower() for k in ["tot", "total", "general"])]
+        if totals:
+            return sorted(totals)[0]
+
+        non_phase = [c for c in cols if c.lower() not in {"eneact1", "eneact2", "eneact3"}]
+        if non_phase:
+            return sorted(non_phase)[0]
+
+        return sorted(cols)[0]
+
+
     @staticmethod
     def analyze_device_dual(df_daily, df_raw, alias, price_kwh=0.15):
         kpis = []
@@ -71,7 +99,7 @@ class Analyzer:
                          })
 
             elif cols_acc:
-                target = cols_acc[0]
+                target = Analyzer.select_primary_energy_column(cols_acc)
                 daily = df_cons[target].fillna(0)
                 total = daily.sum()
                 cost = total * price_kwh
@@ -122,7 +150,12 @@ class Analyzer:
                     "chart_color": "#D32F2F",
                     "chart_profile": prof_data,
                     "type": "energy",
-                    "suffix_name": "(Energía)"
+                    "suffix_name": "(Energía)",
+                    "energy_column_selected": target,
+                    "energy_columns_detected": cols_acc,
+                    "total_energy_computed": float(total),
+                    "price_input": float(price_kwh),
+                    "cost_computed": float(cost),
                 })
         except: pass
 

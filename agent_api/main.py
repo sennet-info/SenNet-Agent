@@ -548,6 +548,11 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         raise HTTPException(status_code=500, detail="PDF generado no encontrado en disco")
 
     recipients = task.get("emails", [])
+    pdf_path_generated = str(safe_path)
+    pdf_filename_generated = safe_path.name
+    pdf_path_emailed = None
+    pdf_filename_emailed = None
+
     if payload.send_email:
         smtp_cfg = smtp_store().read(default={})
         required = ["server", "port", "user", "password"]
@@ -559,6 +564,8 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         subject = f"📊 Informe Energético: {task['site']} ({datetime.now().strftime('%d/%m/%Y')})"
         body = _build_scheduler_email_html(task, resolved_time.range_label)
         email_sent, email_detail = sender.send_email(recipients, subject, body, str(safe_path))
+        pdf_path_emailed = str(safe_path)
+        pdf_filename_emailed = safe_path.name
     else:
         email_sent, email_detail = False, "email_disabled_for_debug"
 
@@ -607,6 +614,11 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "email_sent": email_sent,
         "email_recipients": recipients,
         "email_detail": email_detail,
+        "pdf_path_generated": pdf_path_generated,
+        "pdf_filename_generated": pdf_filename_generated,
+        "pdf_path_emailed": pdf_path_emailed,
+        "pdf_filename_emailed": pdf_filename_emailed,
+        "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
     }
     report_inputs = debug_payload.get("inputs") if isinstance(debug_payload.get("inputs"), dict) else {}
     report_price = report_inputs.get("price_applied_kwh", report_inputs.get("price"))
@@ -644,6 +656,11 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "devices_with_kpis": report_devices_with_kpis,
         "devices_without_data": report_devices_without_data,
         "device_debug": report_device_debug,
+        "pdf_path_generated": pdf_path_generated,
+        "pdf_filename_generated": pdf_filename_generated,
+        "pdf_path_emailed": pdf_path_emailed,
+        "pdf_filename_emailed": pdf_filename_emailed,
+        "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
     }
 
     debug_path = _write_scheduler_debug_file(safe_path, debug_payload) if payload.debug else None
