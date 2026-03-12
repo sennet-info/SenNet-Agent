@@ -33,9 +33,11 @@ def main():
     assert_true("agent_api.scheduler_worker" in worker_service, "systemd worker must execute agent_api.scheduler_worker")
     assert_true("EmailSender" not in worker, "scheduler worker must not send emails directly")
     assert_true("DEPRECATED" in legacy_runner, "legacy app/run_report_oneshot.py must be disabled")
+    assert_true("SystemExit(2)" in legacy_runner, "legacy app/run_report_oneshot.py must hard-fail when executed")
 
     assert_true("_build_scheduler_email_html" in api, "FastAPI scheduler must own professional HTML email template")
     assert_true("sender.send_email" in api, "FastAPI scheduler must send email")
+    assert_true("sender_path" in api, "FastAPI scheduler response must identify sender path")
 
     assert_true("DEPRECATED" in legacy_service and "ExecStart=/bin/false" in legacy_service, "legacy streamlit service must be disabled")
     assert_true("DEPRECATED" in cron_file, "legacy cron file must be deprecated")

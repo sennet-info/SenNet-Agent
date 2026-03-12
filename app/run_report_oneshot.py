@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """DEPRECATED: legacy scheduler runner disabled.
 
-Scheduler automation is now executed by `agent_api/scheduler_worker.py`
-via `sennet-scheduler-worker.service/.timer`.
+This file must never execute scheduled tasks in production.
+Use `agent_api/scheduler_worker.py` via systemd timer.
 """
 
 from datetime import datetime
 
 
-def main():
-    print(f"[{datetime.now().isoformat(timespec='seconds')}] DEPRECATED: run_report_oneshot.py is disabled.")
-    print("Use systemd timer sennet-scheduler-worker.timer (FastAPI-only worker).")
-
-
 if __name__ == "__main__":
-    main()
+    print(f"[{datetime.now().isoformat(timespec='seconds')}] DEPRECATED: run_report_oneshot.py is disabled.")
+    print("Use sennet-scheduler-worker.timer -> agent_api/scheduler_worker.py")
+    raise SystemExit(2)

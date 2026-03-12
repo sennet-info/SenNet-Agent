@@ -150,6 +150,7 @@ Los endpoints de escritura (`POST/PUT/DELETE/run` y SMTP `PUT/test`) requieren `
 - `PUT /v1/scheduler/tasks/{task_id}`: actualiza o habilita/deshabilita.
 - `DELETE /v1/scheduler/tasks/{task_id}`: elimina tarea.
 - `POST /v1/scheduler/tasks/{task_id}/run`: ejecuta tarea completa (resuelve rango/alcance/precio, genera PDF y envía email).
+  - La respuesta incluye `sender_path=fastapi_scheduler` para evidenciar el emisor real.
 - `POST /v1/scheduler/tasks/{task_id}/debug`: ejecuta en modo depuración (genera PDF+debug, **sin enviar email**).
 - `POST /v1/scheduler/run-due`: ejecuta únicamente tareas vencidas (usado por el worker systemd FastAPI-only).
 - `GET /v1/scheduler/smtp`: devuelve SMTP con password enmascarado.

@@ -74,6 +74,7 @@ def main():
         device_debug = audit.get("device_debug") or {}
 
         assert_true(run_resp.get("ok") is True, "run: expected ok=true")
+        assert_true(run_resp.get("sender_path") == "fastapi_scheduler", "run: sender_path must be fastapi_scheduler")
         assert_true(bool(run_resp.get("debug_path")), "run: expected debug_path")
         assert_true(run_resp.get("email_sent") is True, "run: expected email_sent=true")
         assert_true(bool(run_resp.get("email_recipients")), "run: expected email_recipients")
@@ -118,6 +119,7 @@ def main():
 
         debug_only = call("POST", f"{base}/v1/scheduler/tasks/{task_id}/debug", token=args.admin_token, json={"debug": True})
         assert_true(debug_only.get("ok") is True, "debug-only: expected ok=true")
+        assert_true(debug_only.get("sender_path") == "fastapi_scheduler", "debug-only: sender_path must be fastapi_scheduler")
         assert_true(debug_only.get("email_sent") is False, "debug-only: email must be disabled")
         assert_true(debug_only.get("email_detail") == "email_disabled_for_debug", "debug-only: email detail mismatch")
         assert_true(bool(debug_only.get("debug_path")), "debug-only: expected debug_path")

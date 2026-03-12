@@ -162,6 +162,7 @@ def _build_scheduler_email_html(task: dict, range_label: str) -> str:
                     <p style="margin: 4px 0 0 0;"><strong>Generado:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
                 </div>
                 <p>Adjunto encontrarás el PDF con el detalle energético del periodo.</p>
+                <p style="font-size:12px;color:#64748b;">Origen de envío: FastAPI Scheduler</p>
             </div>
         </div>
     </body>
@@ -602,6 +603,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "price_scope_matched_key": price_match_key,
     })
     debug_payload["delivery"] = {
+        "sender": "fastapi_scheduler",
         "email_sent": email_sent,
         "email_recipients": recipients,
         "email_detail": email_detail,
@@ -650,6 +652,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "ok": True,
         "pdf_path": str(safe_path),
         "filename": safe_path.name,
+        "sender_path": "fastapi_scheduler",
         "email_sent": email_sent,
         "email_recipients": recipients,
         "email_detail": email_detail,
