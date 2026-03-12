@@ -14,16 +14,16 @@ from modules.scheduler_logic import SchedulerLogic
 from agent_api.main import scheduler_run_task
 from agent_api.schemas import SchedulerRunRequest
 
-# RUTA LOG CRON
+# RUTA LOG SCHEDULER WORKER
 BASE_DIR = APP_DIR
-CRON_LOG_FILE = os.path.join(BASE_DIR, "cron_log.log")
+WORKER_LOG_FILE = os.path.join(BASE_DIR, "scheduler_worker.log")
 
 
-def log_cron(event, **kwargs):
+def log_worker(event, **kwargs):
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     details = ' '.join([f"{k}={v}" for k, v in kwargs.items()])
     line = f"[{ts}] {event} {details}\n"
-    with open(CRON_LOG_FILE, 'a', encoding='utf-8') as f:
+    with open(WORKER_LOG_FILE, 'a', encoding='utf-8') as f:
         f.write(line)
     print(line.strip())
 
@@ -43,7 +43,7 @@ def _extract_range_bounds(run_resp: dict):
 
 
 def main():
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔎 CRON: Buscando tareas...")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔎 Scheduler Worker: Buscando tareas...")
 
     try:
         tasks = SchedulerLogic.load_tasks()
@@ -56,11 +56,11 @@ def main():
         for task in tasks:
             claim = SchedulerLogic.claim_execution(task['id'], source="cron")
             if not claim.get('ok'):
-                log_cron("TASK_EXECUTE_SKIP", task_id=task['id'], reason=claim.get('reason'))
+                log_worker("TASK_EXECUTE_SKIP", task_id=task['id'], reason=claim.get('reason'))
                 continue
 
             run_id = claim.get('run_id')
-            log_cron("TASK_EXECUTE_START", task_id=task['id'], run_id=run_id)
+            log_worker("TASK_EXECUTE_START", task_id=task['id'], run_id=run_id)
             print(f"   🚀 Ejecutando vía FastAPI: {task['client']} - {task['site']} ({task['frequency']})")
 
             sent_ok = False
@@ -72,7 +72,7 @@ def main():
                 range_start, range_end = _extract_range_bounds(result)
 
                 if result.get("ok") and result.get("pdf_path"):
-                    log_cron(
+                    log_worker(
                         "TASK_EXECUTE_DONE",
                         task_id=task['id'],
                         run_id=run_id,
@@ -81,9 +81,9 @@ def main():
                     )
                     tasks_executed += 1
                 else:
-                    log_cron("TASK_EXECUTE_FAILED", task_id=task['id'], run_id=run_id, detail="run_not_ok")
+                    log_worker("TASK_EXECUTE_FAILED", task_id=task['id'], run_id=run_id, detail="run_not_ok")
             except Exception as e:
-                log_cron("TASK_EXECUTE_ERROR", task_id=task['id'], run_id=run_id, error=str(e))
+                log_worker("TASK_EXECUTE_ERROR", task_id=task['id'], run_id=run_id, error=str(e))
                 print(f"      🔥 Excepción: {e}")
             finally:
                 SchedulerLogic.finish_execution(

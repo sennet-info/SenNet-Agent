@@ -140,6 +140,34 @@ def health():
     return {"ok": True}
 
 
+
+
+def _build_scheduler_email_html(task: dict, range_label: str) -> str:
+    return f"""
+    <html>
+    <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f9; margin: 0; padding: 20px;">
+        <div style="max-width: 640px; margin: auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border: 1px solid #e1e8ed;">
+            <div style="background: linear-gradient(135deg, #EF4444 0%, #B91C1C 100%); padding: 28px; text-align: center; color: white;">
+                <h1 style="margin: 0; font-size: 24px; letter-spacing: 0.5px;">SenNet Intelligence</h1>
+                <p style="margin: 6px 0 0 0; opacity: 0.95; font-size: 14px;">Informe energético automático</p>
+            </div>
+            <div style="padding: 28px; color: #334155; line-height: 1.6;">
+                <h2 style="color: #1e293b; margin-top: 0;">Resumen del informe</h2>
+                <p>Se ha generado un nuevo informe para la instalación <strong>{task['site']}</strong> del cliente <strong>{task['client']}</strong>.</p>
+                <div style="background-color: #f8fafc; border-left: 4px solid #EF4444; padding: 14px 16px; margin: 18px 0; border-radius: 4px;">
+                    <p style="margin: 0;"><strong>Rango:</strong> {range_label}</p>
+                    <p style="margin: 4px 0 0 0;"><strong>Dispositivo principal:</strong> {task.get('device') or '-'}</p>
+                    <p style="margin: 4px 0 0 0;"><strong>Dispositivos extra:</strong> {', '.join(task.get('extra_devices') or []) or '-'}</p>
+                    <p style="margin: 4px 0 0 0;"><strong>Serial:</strong> {task.get('serial') or '-'}</p>
+                    <p style="margin: 4px 0 0 0;"><strong>Generado:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+                </div>
+                <p>Adjunto encontrarás el PDF con el detalle energético del periodo.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
 def _tenant_auth_or_404(tenant: str):
     try:
         return get_tenant_auth(tenant)
@@ -517,10 +545,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     sender = EmailSender(smtp_cfg["server"], smtp_cfg["port"], smtp_cfg["user"], smtp_cfg["password"])
     recipients = task.get("emails", [])
     subject = f"📊 Informe Energético: {task['site']} ({datetime.now().strftime('%d/%m/%Y')})"
-    body = (
-        f"<p>Informe automático generado para <strong>{task['site']}</strong> "
-        f"({task['client']}) en rango <strong>{resolved_time.range_label}</strong>.</p>"
-    )
+    body = _build_scheduler_email_html(task, resolved_time.range_label)
     email_sent, email_detail = sender.send_email(recipients, subject, body, str(safe_path))
 
     if not isinstance(debug_payload, dict):

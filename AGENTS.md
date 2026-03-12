@@ -8,14 +8,19 @@
 - Venv: /opt/sennet-agent/venv
 
 ## Entrypoints
-- Streamlit UI: /opt/sennet-agent/repo/app/app.py (port 8501)
-- Cron oneshot: /opt/sennet-agent/repo/app/run_report_oneshot.py (runs every minute)
+- FastAPI API: /opt/sennet-agent/repo/agent_api/main.py (uvicorn, port 8000)
+- Scheduler worker (FastAPI-only): /opt/sennet-agent/repo/app/run_report_oneshot.py (triggered by systemd timer every minute)
 
 ## Services
-- systemd unit: /etc/systemd/system/sennet-agent.service
+- systemd units:
+  - /etc/systemd/system/sennet-agent-api.service
+  - /etc/systemd/system/sennet-scheduler-worker.timer
+  - /etc/systemd/system/sennet-scheduler-worker.service
 - Manage:
-  - sudo systemctl restart sennet-agent.service
-  - journalctl -u sennet-agent.service -n 200 --no-pager
+  - sudo systemctl restart sennet-agent-api.service
+  - sudo systemctl restart sennet-scheduler-worker.timer
+  - journalctl -u sennet-agent-api.service -n 200 --no-pager
+  - journalctl -u sennet-scheduler-worker.service -n 200 --no-pager
 
 ## Runtime configs (DO NOT COMMIT)
 These are runtime-only and must never be committed to Git:
@@ -31,8 +36,9 @@ Repo uses symlinks in:
 - scripts/deploy.sh:
   - Updates /opt/sennet-agent/repo from GitHub
   - Installs/updates systemd unit
-  - Installs/updates /etc/cron.d/sennet-agent
-- Keep absolute paths in systemd/cron/scripts.
+  - Installs/updates API + scheduler worker systemd units
+  - Removes legacy /etc/cron.d/sennet-agent
+- Keep absolute paths in systemd scripts.
 
 ## Safety
 - Never log or commit secrets (tokens, SMTP passwords).

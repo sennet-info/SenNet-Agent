@@ -52,15 +52,19 @@ if [ -f "$REPO_DIR/requirements.txt" ]; then
   "$VENV/bin/pip" install -r "$REPO_DIR/requirements.txt"
 fi
 
-echo "==> Install systemd service"
-sudo cp "$REPO_DIR/systemd/sennet-agent.service" /etc/systemd/system/sennet-agent.service
+echo "==> Install FastAPI services"
+sudo cp "$REPO_DIR/systemd/sennet-agent-api.service" /etc/systemd/system/sennet-agent-api.service
+sudo cp "$REPO_DIR/systemd/sennet-scheduler-worker.service" /etc/systemd/system/sennet-scheduler-worker.service
+sudo cp "$REPO_DIR/systemd/sennet-scheduler-worker.timer" /etc/systemd/system/sennet-scheduler-worker.timer
 sudo systemctl daemon-reload
-sudo systemctl enable --now sennet-agent.service
-sudo systemctl restart sennet-agent.service
+sudo systemctl enable --now sennet-agent-api.service
+sudo systemctl restart sennet-agent-api.service
+sudo systemctl enable --now sennet-scheduler-worker.timer
+sudo systemctl restart sennet-scheduler-worker.timer
 
-echo "==> Install cron"
-sudo cp "$REPO_DIR/cron/sennet-agent.cron" /etc/cron.d/sennet-agent
-sudo chmod 644 /etc/cron.d/sennet-agent
+echo "==> Disable legacy Streamlit/cron runtime"
+sudo systemctl disable --now sennet-agent.service 2>/dev/null || true
+sudo rm -f /etc/cron.d/sennet-agent
 
 if [ -d "$PORTAL_SOURCE_DIR" ]; then
   echo "==> Portal detected in $PORTAL_SOURCE_DIR"
@@ -93,7 +97,8 @@ else
 fi
 
 echo "==> Done"
-systemctl --no-pager --full status sennet-agent.service || true
+systemctl --no-pager --full status sennet-agent-api.service || true
+systemctl --no-pager --full status sennet-scheduler-worker.timer || true
 if systemctl list-unit-files | grep -q '^sennet-portal.service'; then
   systemctl --no-pager --full status sennet-portal.service || true
 fi

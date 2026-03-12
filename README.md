@@ -193,7 +193,24 @@ python scripts/smoke_test_scheduler_api.py \
   --tenant <tenant> --client <client> --site <site> --device <device> --email test@example.com
 ```
 
-### Nota de operación
+### Nota de operación (FastAPI-only)
 
-- El scheduler moderno debe ejecutarse vía FastAPI (`/v1/scheduler/*`) como camino operativo único.
-- Streamlit/cron quedan como legado y no deben ser la vía de negocio en producción para resolución de alcance/rango/envío.
+- El flujo productivo de informes/scheduler es único: **Portal Next.js + FastAPI**.
+- Las tareas automáticas se ejecutan por `sennet-scheduler-worker.timer` llamando internamente a `POST /v1/scheduler/tasks/{task_id}/run`.
+- `SCHEDULED_TASKS_PATH` y `SMTP_CONFIG_PATH` son persistencia del scheduler FastAPI (no compartida con ejecutores legacy).
+- El envío de email de tareas se hace una sola vez en `scheduler_run_task` con plantilla HTML profesional.
+
+### Servicios recomendados en producción
+
+```bash
+sudo systemctl enable --now sennet-agent-api.service
+sudo systemctl enable --now sennet-scheduler-worker.timer
+sudo systemctl enable --now sennet-portal.service
+```
+
+Desactivar legado (evita doble envío):
+
+```bash
+sudo systemctl disable --now sennet-agent.service || true
+sudo rm -f /etc/cron.d/sennet-agent
+```
