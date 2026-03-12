@@ -84,6 +84,7 @@ export default function ProgramadorPage() {
   const [emailInput, setEmailInput] = useState("");
   const [extraDeviceCandidate, setExtraDeviceCandidate] = useState("");
   const [lastDebugRun, setLastDebugRun] = useState<SchedulerRunResult | null>(null);
+  const [debugCopied, setDebugCopied] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -316,6 +317,7 @@ export default function ProgramadorPage() {
       setError("");
       const result = await schedulerRunTask(token, taskId, withDebug ? { debug: true, debug_sample_n: 10 } : {});
       setLastDebugRun(withDebug ? result : null);
+      setDebugCopied(false);
       window.open(downloadUrl(result.pdf_path), "_blank");
       const recipients = result.email_recipients?.length ? result.email_recipients.join(", ") : "sin destinatarios";
       const delivery = result.email_sent ? "Email enviado" : "Email no enviado";
@@ -323,6 +325,17 @@ export default function ProgramadorPage() {
       setOkMsg(`Ejecución OK: ${result.filename}. ${delivery} (${recipients}). ${result.email_detail || ""}.${debugInfo}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo ejecutar");
+    }
+  }
+
+  async function copyLastDebug() {
+    if (!lastDebugRun?.debug) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(lastDebugRun.debug, null, 2));
+      setDebugCopied(true);
+      setTimeout(() => setDebugCopied(false), 1800);
+    } catch {
+      setError("No se pudo copiar el debug al portapapeles");
     }
   }
 
@@ -733,6 +746,17 @@ export default function ProgramadorPage() {
                 Descargar debug.json
               </a>
             ) : null}
+            <button
+              className="rounded bg-slate-700 px-2 py-1 text-white"
+              type="button"
+              onClick={copyLastDebug}
+            >
+              Copiar debug
+            </button>
+            {debugCopied ? <span className="text-emerald-300">Copiado ✓</span> : null}
+          </div>
+          <div className="mb-2 text-slate-400">
+            Revisa aquí el flujo real ejecutado (devices, rango, pricing, query trace y delivery).
           </div>
           <pre className="max-h-80 overflow-auto rounded bg-black/40 p-2">
             {JSON.stringify(lastDebugRun.debug, null, 2)}
