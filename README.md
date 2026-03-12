@@ -215,3 +215,15 @@ Desactivar legado (evita doble envío):
 sudo systemctl disable --now sennet-agent.service || true
 sudo rm -f /etc/cron.d/sennet-agent
 ```
+
+### Verificación anti-emisor legacy (host)
+
+```bash
+systemctl is-active sennet-agent-api.service
+systemctl is-enabled sennet-scheduler-worker.timer
+systemctl cat sennet-scheduler-worker.service | rg 'agent_api.scheduler_worker'
+systemctl is-active sennet-agent.service || true
+test ! -f /etc/cron.d/sennet-agent && echo 'cron legacy ausente'
+```
+
+Si recibes un correo incorrecto tras desplegar, casi siempre indica que el host aún no está actualizado o mantiene un servicio/cron legacy fuera de esta rama.

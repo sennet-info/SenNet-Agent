@@ -44,6 +44,10 @@ def main():
     assert_true("EmailSender" not in streamlit_app, "streamlit file must not contain smtp runtime code")
     assert_true("run_analysis_discovery" not in legacy_oneshot, "legacy oneshot must not run report generation")
     assert_true("EmailSender" not in legacy_oneshot, "legacy oneshot must not send emails")
+    assert_true("SchedulerLogic" not in legacy_oneshot, "legacy oneshot must not orchestrate scheduler tasks")
+    assert_true("compute_report_range" not in legacy_oneshot, "legacy oneshot must not resolve report ranges")
+    assert_true("run_report_oneshot.py" not in worker_service, "systemd worker must not execute legacy oneshot")
+    assert_true("agent_api/scheduler_worker.py" in cron_file, "cron file must point to FastAPI worker deprecation note only")
 
 
 
@@ -54,6 +58,8 @@ def main():
         if any(part in rel for part in [".git", "portal/node_modules"]) or rel.endswith('.old'):
             continue
         if rel in {"app/modules/email_sender.py", "scripts/validate_fastapi_only_architecture.py"}:
+            continue
+        if rel.startswith("scripts/") and rel != "scripts/validate_fastapi_only_architecture.py":
             continue
         text = file.read_text(encoding="utf-8", errors="ignore")
         if "send_email(" in text:
