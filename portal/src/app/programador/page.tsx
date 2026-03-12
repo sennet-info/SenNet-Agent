@@ -7,7 +7,9 @@ import {
   discoveryDevices,
   discoverySerials,
   discoverySites,
+  downloadDebugUrl,
   downloadUrl,
+  SchedulerRunResult,
   SchedulerTask,
   schedulerCreateTask,
   schedulerDeleteTask,
@@ -81,6 +83,7 @@ export default function ProgramadorPage() {
   const [testRecipient, setTestRecipient] = useState("");
   const [emailInput, setEmailInput] = useState("");
   const [extraDeviceCandidate, setExtraDeviceCandidate] = useState("");
+  const [lastDebugRun, setLastDebugRun] = useState<SchedulerRunResult | null>(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -308,13 +311,16 @@ export default function ProgramadorPage() {
     }
   }
 
-  async function runTask(taskId: string) {
+  async function runTask(taskId: string, withDebug = false) {
     try {
-      const result = await schedulerRunTask(token, taskId);
+      setError("");
+      const result = await schedulerRunTask(token, taskId, withDebug ? { debug: true, debug_sample_n: 10 } : {});
+      setLastDebugRun(withDebug ? result : null);
       window.open(downloadUrl(result.pdf_path), "_blank");
       const recipients = result.email_recipients?.length ? result.email_recipients.join(", ") : "sin destinatarios";
       const delivery = result.email_sent ? "Email enviado" : "Email no enviado";
-      setOkMsg(`Ejecución OK: ${result.filename}. ${delivery} (${recipients}). ${result.email_detail || ""}`);
+      const debugInfo = withDebug ? ` Debug: ${result.debug_path || "inline"}.` : "";
+      setOkMsg(`Ejecución OK: ${result.filename}. ${delivery} (${recipients}). ${result.email_detail || ""}.${debugInfo}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo ejecutar");
     }
@@ -703,12 +709,34 @@ export default function ProgramadorPage() {
                   </td>
                   <td className="space-x-2 px-3 py-2">
                     <button className="rounded bg-blue-700 px-2 py-1" onClick={() => runTask(task.id)}>Ejecutar ahora</button>
+                    <button className="rounded bg-indigo-700 px-2 py-1" onClick={() => runTask(task.id, true)}>Ejecutar con debug</button>
                     <button className="rounded bg-red-700 px-2 py-1" onClick={() => removeTask(task.id)}>Borrar</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {tab === "tasks" && lastDebugRun?.debug && (
+        <div className="mt-4 rounded-lg border border-indigo-700/60 bg-slate-950/80 p-4 text-xs text-slate-200">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <strong className="text-indigo-300">Última ejecución debug</strong>
+            {lastDebugRun.debug_path ? (
+              <a
+                className="rounded bg-indigo-600 px-2 py-1 text-white"
+                href={downloadDebugUrl(lastDebugRun.debug_path)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Descargar debug.json
+              </a>
+            ) : null}
+          </div>
+          <pre className="max-h-80 overflow-auto rounded bg-black/40 p-2">
+            {JSON.stringify(lastDebugRun.debug, null, 2)}
+          </pre>
         </div>
       )}
 

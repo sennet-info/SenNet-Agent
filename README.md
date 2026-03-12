@@ -129,6 +129,7 @@ Rutas nuevas:
 - `/informes`
 
 En `/informes` puedes activar el toggle **Debug** antes de "Generar" para enviar `debug=true`, renderizar el panel de evidencia y habilitar el botón **Descargar debug.json**.
+En `/programador` (Tareas activas) existe además **Ejecutar con debug**, que ejecuta `run` con `debug=true` y muestra panel inline + botón **Descargar debug.json** de la última ejecución.
 
 Smoke test API:
 
