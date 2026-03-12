@@ -168,6 +168,16 @@ def _build_scheduler_email_html(task: dict, range_label: str) -> str:
     </html>
     """
 
+
+
+def _write_scheduler_debug_file(pdf_path: Path, debug_payload: dict) -> str | None:
+    if not isinstance(debug_payload, dict):
+        return None
+    debug_filename = pdf_path.with_suffix(".scheduler.debug.json").name
+    debug_file = safe_output_path(debug_filename)
+    debug_file.write_text(json.dumps(debug_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(debug_file)
+
 def _tenant_auth_or_404(tenant: str):
     try:
         return get_tenant_auth(tenant)
@@ -536,17 +546,20 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     if not safe_path.exists():
         raise HTTPException(status_code=500, detail="PDF generado no encontrado en disco")
 
-    smtp_cfg = smtp_store().read(default={})
-    required = ["server", "port", "user", "password"]
-    missing = [key for key in required if not smtp_cfg.get(key)]
-    if missing:
-        raise HTTPException(status_code=422, detail=f"SMTP incompleto: faltan {', '.join(missing)}")
-
-    sender = EmailSender(smtp_cfg["server"], smtp_cfg["port"], smtp_cfg["user"], smtp_cfg["password"])
     recipients = task.get("emails", [])
-    subject = f"📊 Informe Energético: {task['site']} ({datetime.now().strftime('%d/%m/%Y')})"
-    body = _build_scheduler_email_html(task, resolved_time.range_label)
-    email_sent, email_detail = sender.send_email(recipients, subject, body, str(safe_path))
+    if payload.send_email:
+        smtp_cfg = smtp_store().read(default={})
+        required = ["server", "port", "user", "password"]
+        missing = [key for key in required if not smtp_cfg.get(key)]
+        if missing:
+            raise HTTPException(status_code=422, detail=f"SMTP incompleto: faltan {', '.join(missing)}")
+
+        sender = EmailSender(smtp_cfg["server"], smtp_cfg["port"], smtp_cfg["user"], smtp_cfg["password"])
+        subject = f"📊 Informe Energético: {task['site']} ({datetime.now().strftime('%d/%m/%Y')})"
+        body = _build_scheduler_email_html(task, resolved_time.range_label)
+        email_sent, email_detail = sender.send_email(recipients, subject, body, str(safe_path))
+    else:
+        email_sent, email_detail = False, "email_disabled_for_debug"
 
     if not isinstance(debug_payload, dict):
         debug_payload = {}
@@ -631,6 +644,8 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "device_debug": report_device_debug,
     }
 
+    debug_path = _write_scheduler_debug_file(safe_path, debug_payload) if payload.debug else None
+
     return {
         "ok": True,
         "pdf_path": str(safe_path),
@@ -638,8 +653,17 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "email_sent": email_sent,
         "email_recipients": recipients,
         "email_detail": email_detail,
+        "debug_path": debug_path,
         "debug": debug_payload,
     }
+
+
+@app.post("/v1/scheduler/tasks/{task_id}/debug", dependencies=[Depends(_require_admin_token)])
+async def scheduler_debug_task(task_id: str, payload: SchedulerRunRequest = Body(default=SchedulerRunRequest(debug=True, send_email=False))):
+    debug_payload = payload.model_copy(update={"debug": True, "send_email": False})
+    result = await scheduler_run_task(task_id=task_id, payload=debug_payload)
+    result["mode"] = "debug_only"
+    return result
 
 
 

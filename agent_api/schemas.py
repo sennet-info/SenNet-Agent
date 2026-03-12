@@ -102,6 +102,7 @@ class SchedulerRunRequest(BaseModel):
     debug_sample_n: int = Field(default=10, ge=1, le=50)
     max_workers: int = Field(default=4, ge=1, le=16)
     force_recalculate: bool = False
+    send_email: bool = True
 
 
 class SmtpConfigRequest(BaseModel):

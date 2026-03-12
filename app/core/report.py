@@ -414,6 +414,13 @@ def generate_report_pdf(
                     "sha256": hashlib.sha256(query_text.encode("utf-8")).hexdigest() if query_text else None,
                     "snippet": snippet,
                 },
+                "data_sources": {
+                    "engine": "influxdb",
+                    "url": auth_config.get("url"),
+                    "org": auth_config.get("org"),
+                    "bucket": auth_config.get("bucket"),
+                    "query_trace": query_trace,
+                },
                 "stats": {
                     "total_series": len(stats_by_series),
                     "total_points": total_points,

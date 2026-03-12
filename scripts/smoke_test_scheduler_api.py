@@ -74,6 +74,7 @@ def main():
         device_debug = audit.get("device_debug") or {}
 
         assert_true(run_resp.get("ok") is True, "run: expected ok=true")
+        assert_true(bool(run_resp.get("debug_path")), "run: expected debug_path")
         assert_true(run_resp.get("email_sent") is True, "run: expected email_sent=true")
         assert_true(bool(run_resp.get("email_recipients")), "run: expected email_recipients")
         assert_true(resolved_range.get("range_mode") == "last_n_days", "resolved_range.range_mode must be last_n_days")
@@ -113,6 +114,13 @@ def main():
             assert_true(isinstance(pdf_price, (int, float)), "audit.price_used_in_pdf should be numeric")
             assert_true(abs(float(report_price) - args.serial_price) < 1e-9, "audit.price_applied_in_report mismatch")
             assert_true(abs(float(pdf_price) - args.serial_price) < 1e-9, "audit.price_used_in_pdf mismatch")
+
+
+        debug_only = call("POST", f"{base}/v1/scheduler/tasks/{task_id}/debug", token=args.admin_token, json={"debug": True})
+        assert_true(debug_only.get("ok") is True, "debug-only: expected ok=true")
+        assert_true(debug_only.get("email_sent") is False, "debug-only: email must be disabled")
+        assert_true(debug_only.get("email_detail") == "email_disabled_for_debug", "debug-only: email detail mismatch")
+        assert_true(bool(debug_only.get("debug_path")), "debug-only: expected debug_path")
 
         print("Scheduler smoke assertions OK")
     finally:
