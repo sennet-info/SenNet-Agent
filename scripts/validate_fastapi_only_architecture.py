@@ -45,6 +45,22 @@ def main():
     assert_true("run_analysis_discovery" not in legacy_oneshot, "legacy oneshot must not run report generation")
     assert_true("EmailSender" not in legacy_oneshot, "legacy oneshot must not send emails")
 
+
+
+    # Ensure single active email emitter path (FastAPI scheduler/main)
+    active_call_sites = []
+    for file in ROOT.rglob("*.py"):
+        rel = file.relative_to(ROOT).as_posix()
+        if any(part in rel for part in [".git", "portal/node_modules"]) or rel.endswith('.old'):
+            continue
+        if rel in {"app/modules/email_sender.py", "scripts/validate_fastapi_only_architecture.py"}:
+            continue
+        text = file.read_text(encoding="utf-8", errors="ignore")
+        if "send_email(" in text:
+            active_call_sites.append(rel)
+
+    assert_true(active_call_sites == ["agent_api/main.py"], f"unexpected active send_email call sites: {active_call_sites}")
+
     print("FastAPI-only architecture validation passed")
 
 
