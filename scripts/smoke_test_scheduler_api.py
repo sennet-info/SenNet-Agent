@@ -90,7 +90,15 @@ def main():
         assert_true("price_scope_matched_key" in pricing, "pricing.price_scope_matched_key missing")
         assert_true("price_applied_in_report" in audit, "audit.price_applied_in_report missing")
         assert_true("final_report_data_summary" in debug, "debug.final_report_data_summary missing")
+        fr_summary = debug.get("final_report_data_summary") or {}
+        assert_true("visible_aliases_by_section" in fr_summary, "debug.final_report_data_summary.visible_aliases_by_section missing")
         assert_true("same_generated_and_emailed" in delivery, "delivery.same_generated_and_emailed missing")
+        assert_true("pdf_exists_after_generation" in delivery, "delivery.pdf_exists_after_generation missing")
+        assert_true("pdf_size_bytes" in delivery, "delivery.pdf_size_bytes missing")
+        assert_true("pdf_exists_before_email" in delivery, "delivery.pdf_exists_before_email missing")
+        assert_true("pdf_size_bytes_emailed" in delivery, "delivery.pdf_size_bytes_emailed missing")
+        assert_true("email_subject" in delivery, "delivery.email_subject missing")
+        assert_true("email_attachment_names" in delivery, "delivery.email_attachment_names missing")
         assert_true("price_used_in_pdf" in audit, "audit.price_used_in_pdf missing")
         assert_true(isinstance(device_debug, dict), "audit.device_debug must be dict")
         assert_true(audit.get("price_matches_report") in {True, None}, "audit.price_matches_report should be true when available")
@@ -109,9 +117,12 @@ def main():
                 assert_true("generated_kpis" in info, f"device_debug generated_kpis missing for {dev}")
                 assert_true("energy_columns_detected" in info, f"device_debug energy_columns_detected missing for {dev}")
                 assert_true("energy_column_selected" in info, f"device_debug energy_column_selected missing for {dev}")
+                assert_true("daily_columns_detected" in info, f"device_debug daily_columns_detected missing for {dev}")
+                assert_true("raw_columns_detected" in info, f"device_debug raw_columns_detected missing for {dev}")
                 assert_true("total_energy_computed" in info, f"device_debug total_energy_computed missing for {dev}")
                 assert_true("cost_computed" in info, f"device_debug cost_computed missing for {dev}")
                 assert_true("generated_kpis_count" in info and "generated_kpis_keys" in info, f"device_debug generated_kpis summary missing for {dev}")
+                assert_true("generated_kpis_detail" in info, f"device_debug generated_kpis_detail missing for {dev}")
 
         if args.serial and args.serial_price is not None:
             assert_true(pricing.get("price_source") == "serial", "pricing.price_source should be serial")
@@ -125,6 +136,12 @@ def main():
             assert_true(abs(float(pdf_price) - args.serial_price) < 1e-9, "audit.price_used_in_pdf mismatch")
             same_pdf = delivery.get("same_generated_and_emailed")
             assert_true(same_pdf in {True, None}, "delivery.same_generated_and_emailed should be true when email sent")
+            assert_true(delivery.get("pdf_exists_after_generation") is True, "delivery.pdf_exists_after_generation must be true")
+            assert_true(isinstance(delivery.get("pdf_size_bytes"), int) and delivery.get("pdf_size_bytes") > 0, "delivery.pdf_size_bytes must be positive int")
+            assert_true(delivery.get("pdf_exists_before_email") is True, "delivery.pdf_exists_before_email must be true when email is sent")
+            assert_true(isinstance(delivery.get("pdf_size_bytes_emailed"), int) and delivery.get("pdf_size_bytes_emailed") > 0, "delivery.pdf_size_bytes_emailed must be positive int")
+            assert_true(bool(delivery.get("email_subject")), "delivery.email_subject must be populated when email is sent")
+            assert_true(isinstance(delivery.get("email_attachment_names"), list) and len(delivery.get("email_attachment_names")) == 1, "delivery.email_attachment_names must contain the PDF")
 
 
         debug_only = call("POST", f"{base}/v1/scheduler/tasks/{task_id}/debug", token=args.admin_token, json={"debug": True})

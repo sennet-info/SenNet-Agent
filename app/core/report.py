@@ -131,6 +131,8 @@ def generate_report_pdf(
             "discard_reason": None,
             "energy_columns_detected": [],
             "energy_column_selected": None,
+            "daily_columns_detected": [],
+            "raw_columns_detected": [],
             "total_energy_computed": None,
             "price_input": None,
             "price_input_to_analyzer": None,
@@ -138,6 +140,7 @@ def generate_report_pdf(
             "cost_computed": None,
             "computed_cost": None,
             "kpi_secondary_value": None,
+            "generated_kpis_detail": [],
         }
 
     def _to_df(frame):
@@ -212,6 +215,8 @@ def generate_report_pdf(
             c for c in df_daily.columns
             if isinstance(c, str) and any(k in c for k in ['ENEact', 'active_energy', 'm3', 'pulse', 'volumen'])
         ]
+        daily_columns_detected = [c for c in df_daily.columns if isinstance(c, str)]
+        raw_columns_detected = [c for c in df_raw.columns if isinstance(c, str)]
         energy_column_selected = Analyzer.select_primary_energy_column(energy_columns_detected)
         has_data = not df_daily.empty or not df_raw.empty
         if has_data:
@@ -266,6 +271,8 @@ def generate_report_pdf(
             "kpi_secondary_value": kpi_secondary_value,
             "energy_columns_detected": energy_columns_detected,
             "energy_column_selected": energy_column_selected,
+            "daily_columns_detected": daily_columns_detected,
+            "raw_columns_detected": raw_columns_detected,
             "total_energy_computed": total_energy_computed,
             "price_input": price_input,
             "price_input_to_analyzer": price,
@@ -290,6 +297,8 @@ def generate_report_pdf(
         device_entry["kpi_secondary_value"] = result["kpi_secondary_value"]
         device_entry["energy_columns_detected"] = result["energy_columns_detected"]
         device_entry["energy_column_selected"] = result["energy_column_selected"]
+        device_entry["daily_columns_detected"] = result["daily_columns_detected"]
+        device_entry["raw_columns_detected"] = result["raw_columns_detected"]
         device_entry["total_energy_computed"] = result["total_energy_computed"]
         device_entry["periods"].append({
             "section": result["section"],
@@ -310,6 +319,16 @@ def generate_report_pdf(
                 key = f"{dev_name} {kpi.get('suffix_name', '')}".strip()
                 if key not in device_entry["generated_kpis_keys"]:
                     device_entry["generated_kpis_keys"].append(key)
+                device_entry["generated_kpis_detail"].append({
+                    "section": result["section"],
+                    "key": key,
+                    "title": kpi.get("title"),
+                    "main_value": kpi.get("main_value"),
+                    "secondary_value": kpi.get("secondary_value"),
+                    "label_main": kpi.get("label_main", kpi.get("sub_value")),
+                    "label_sec": kpi.get("label_sec", kpi.get("secondary_label")),
+                    "type": kpi.get("type"),
+                })
                 final_report_data[result["section"]][key] = kpi
         else:
             if not result.get("has_data"):
@@ -419,7 +438,12 @@ def generate_report_pdf(
                 "sections": list(final_report_data.keys()),
                 "kpis_count_by_section": {section: len(items) for section, items in final_report_data.items()},
                 "keys_by_section": {section: list(items.keys()) for section, items in final_report_data.items()},
+                "visible_aliases_by_section": {
+                    section: sorted({key.split(" (", 1)[0].strip() for key in items.keys() if isinstance(key, str) and key.strip()})
+                    for section, items in final_report_data.items()
+                },
             }
+            query_trace = debug_queries
 
             debug_payload = {
                 "inputs": {

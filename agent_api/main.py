@@ -550,8 +550,14 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     recipients = task.get("emails", [])
     pdf_path_generated = str(safe_path)
     pdf_filename_generated = safe_path.name
+    pdf_exists_after_generation = safe_path.exists()
+    pdf_size_bytes = safe_path.stat().st_size if pdf_exists_after_generation else None
     pdf_path_emailed = None
     pdf_filename_emailed = None
+    pdf_exists_before_email = None
+    pdf_size_bytes_emailed = None
+    email_subject = None
+    email_attachment_names = []
 
     if payload.send_email:
         smtp_cfg = smtp_store().read(default={})
@@ -564,8 +570,12 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         subject = f"📊 Informe Energético: {task['site']} ({datetime.now().strftime('%d/%m/%Y')})"
         body = _build_scheduler_email_html(task, resolved_time.range_label)
         email_sent, email_detail = sender.send_email(recipients, subject, body, str(safe_path))
+        email_subject = subject
+        email_attachment_names = [safe_path.name]
         pdf_path_emailed = str(safe_path)
         pdf_filename_emailed = safe_path.name
+        pdf_exists_before_email = safe_path.exists()
+        pdf_size_bytes_emailed = safe_path.stat().st_size if pdf_exists_before_email else None
     else:
         email_sent, email_detail = False, "email_disabled_for_debug"
 
@@ -614,10 +624,16 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "email_sent": email_sent,
         "email_recipients": recipients,
         "email_detail": email_detail,
+        "email_subject": email_subject,
+        "email_attachment_names": email_attachment_names,
         "pdf_path_generated": pdf_path_generated,
         "pdf_filename_generated": pdf_filename_generated,
+        "pdf_exists_after_generation": pdf_exists_after_generation,
+        "pdf_size_bytes": pdf_size_bytes,
         "pdf_path_emailed": pdf_path_emailed,
         "pdf_filename_emailed": pdf_filename_emailed,
+        "pdf_exists_before_email": pdf_exists_before_email,
+        "pdf_size_bytes_emailed": pdf_size_bytes_emailed,
         "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
     }
     report_inputs = debug_payload.get("inputs") if isinstance(debug_payload.get("inputs"), dict) else {}
@@ -656,10 +672,18 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "devices_with_kpis": report_devices_with_kpis,
         "devices_without_data": report_devices_without_data,
         "device_debug": report_device_debug,
+        "email_sent": email_sent,
+        "email_recipients": recipients,
+        "email_subject": email_subject,
+        "email_attachment_names": email_attachment_names,
         "pdf_path_generated": pdf_path_generated,
         "pdf_filename_generated": pdf_filename_generated,
+        "pdf_exists_after_generation": pdf_exists_after_generation,
+        "pdf_size_bytes": pdf_size_bytes,
         "pdf_path_emailed": pdf_path_emailed,
         "pdf_filename_emailed": pdf_filename_emailed,
+        "pdf_exists_before_email": pdf_exists_before_email,
+        "pdf_size_bytes_emailed": pdf_size_bytes_emailed,
         "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
     }
 
