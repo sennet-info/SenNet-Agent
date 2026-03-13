@@ -67,6 +67,7 @@ def main():
     try:
         run_resp = call("POST", f"{base}/v1/scheduler/tasks/{task_id}/run", token=args.admin_token, json={"debug": True})
         debug = run_resp.get("debug") or {}
+        summary = debug.get("summary") or {}
         resolved_range = debug.get("resolved_range") or {}
         device_scope = debug.get("device_scope") or {}
         pricing = debug.get("pricing") or {}
@@ -89,6 +90,11 @@ def main():
         assert_true("price_scope" in pricing, "pricing.price_scope missing")
         assert_true("price_scope_matched_key" in pricing, "pricing.price_scope_matched_key missing")
         assert_true("price_applied_in_report" in audit, "audit.price_applied_in_report missing")
+        assert_true("summary" in debug, "debug.summary missing")
+        assert_true("energy_resolution" in debug, "debug.energy_resolution missing")
+        assert_true("report_resolution" in debug, "debug.report_resolution missing")
+        assert_true("pdf_resolution" in debug, "debug.pdf_resolution missing")
+        assert_true("email_resolution" in debug, "debug.email_resolution missing")
         assert_true("final_report_data_summary" in debug, "debug.final_report_data_summary missing")
         fr_summary = debug.get("final_report_data_summary") or {}
         assert_true("visible_aliases_by_section" in fr_summary, "debug.final_report_data_summary.visible_aliases_by_section missing")
@@ -99,6 +105,7 @@ def main():
         assert_true("pdf_size_bytes_emailed" in delivery, "delivery.pdf_size_bytes_emailed missing")
         assert_true("email_subject" in delivery, "delivery.email_subject missing")
         assert_true("email_attachment_names" in delivery, "delivery.email_attachment_names missing")
+        assert_true("email_resolution" in summary or "email_resolution" in debug, "email_resolution summary missing")
         assert_true("price_used_in_pdf" in audit, "audit.price_used_in_pdf missing")
         assert_true(isinstance(device_debug, dict), "audit.device_debug must be dict")
         assert_true(audit.get("price_matches_report") in {True, None}, "audit.price_matches_report should be true when available")

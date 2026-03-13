@@ -579,6 +579,13 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     else:
         email_sent, email_detail = False, "email_disabled_for_debug"
 
+    email_warnings = []
+    if payload.send_email:
+        if not pdf_exists_after_generation or not pdf_size_bytes:
+            email_warnings.append("PDF generado inexistente o vacío antes del envío")
+        if not pdf_exists_before_email or not pdf_size_bytes_emailed:
+            email_warnings.append("Adjunto de email inexistente o vacío")
+
     if not isinstance(debug_payload, dict):
         debug_payload = {}
 
@@ -636,6 +643,23 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "pdf_size_bytes_emailed": pdf_size_bytes_emailed,
         "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
     }
+    debug_payload["email_resolution"] = {
+        "email_enabled": bool(payload.send_email),
+        "attachments": email_attachment_names,
+        "attachment_exists": bool(pdf_exists_before_email) if payload.send_email else None,
+        "attachment_size_bytes": pdf_size_bytes_emailed,
+        "email_subject": email_subject,
+        "summary_of_report_items_sent": [
+            {
+                "alias_or_title": item.get("alias_or_title"),
+                "main_value": item.get("main_value"),
+                "secondary_value": item.get("secondary_value"),
+            }
+            for item in ((debug_payload.get("report_resolution") or {}).get("report_items") or [])[:20]
+        ],
+        "warnings": email_warnings,
+    }
+
     report_inputs = debug_payload.get("inputs") if isinstance(debug_payload.get("inputs"), dict) else {}
     report_price = report_inputs.get("price_applied_kwh", report_inputs.get("price"))
     report_price_pdf = report_inputs.get("price_used_in_pdf", report_price)
@@ -686,6 +710,17 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "pdf_size_bytes_emailed": pdf_size_bytes_emailed,
         "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
     }
+
+    all_warnings = list(debug_payload.get("warnings") or [])
+    all_warnings.extend(email_warnings)
+    debug_payload["warnings"] = all_warnings
+
+    if payload.debug:
+        summary = debug_payload.get("summary") if isinstance(debug_payload.get("summary"), dict) else {}
+        summary["email_resolution"] = debug_payload.get("email_resolution")
+        summary["pdf_resolution"] = debug_payload.get("pdf_resolution")
+        summary["warnings"] = all_warnings
+        debug_payload["summary"] = summary
 
     debug_path = _write_scheduler_debug_file(safe_path, debug_payload) if payload.debug else None
 

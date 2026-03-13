@@ -141,6 +141,12 @@ def generate_report_pdf(
             "computed_cost": None,
             "kpi_secondary_value": None,
             "generated_kpis_detail": [],
+            "selected_by_rule": None,
+            "rejected_columns": [],
+            "warning": None,
+            "daily_points_used": 0,
+            "first_daily_ts": None,
+            "last_daily_ts": None,
         }
 
     def _to_df(frame):
@@ -217,7 +223,8 @@ def generate_report_pdf(
         ]
         daily_columns_detected = [c for c in df_daily.columns if isinstance(c, str)]
         raw_columns_detected = [c for c in df_raw.columns if isinstance(c, str)]
-        energy_column_selected = Analyzer.select_primary_energy_column(energy_columns_detected)
+        energy_resolution = Analyzer.resolve_primary_energy_column(energy_columns_detected)
+        energy_column_selected = energy_resolution.get("selected_energy_column")
         has_data = not df_daily.empty or not df_raw.empty
         if has_data:
             analysis_start = time.perf_counter()
@@ -231,6 +238,9 @@ def generate_report_pdf(
         cost_computed = None
         price_input = price
         energy_kpi = next((item for item in kpis if item.get("type") == "energy"), None)
+        selected_by_rule = energy_resolution.get("selected_by_rule")
+        rejected_columns = energy_resolution.get("rejected_columns", [])
+        energy_warning = energy_resolution.get("warning")
         if energy_kpi:
             kpi_secondary_value = energy_kpi.get("secondary_value")
             if isinstance(energy_kpi.get("energy_columns_detected"), list):
@@ -239,6 +249,9 @@ def generate_report_pdf(
             total_energy_computed = energy_kpi.get("total_energy_computed")
             price_input = energy_kpi.get("price_input", price)
             cost_computed = energy_kpi.get("cost_computed")
+            selected_by_rule = energy_kpi.get("energy_selection_rule", selected_by_rule)
+            rejected_columns = energy_kpi.get("energy_rejected_columns", rejected_columns)
+            energy_warning = energy_kpi.get("energy_warning", energy_warning)
             numeric_cost = re.findall(r"[-+]?\d*\.?\d+", str(kpi_secondary_value or ""))
             if numeric_cost:
                 try:
@@ -254,6 +267,27 @@ def generate_report_pdf(
                         price_used_in_analyzer = computed_cost / total_energy
                 except ValueError:
                     price_used_in_analyzer = None
+
+        daily_points_used = 0
+        first_daily_ts = None
+        last_daily_ts = None
+        if not df_daily.empty and "_time" in df_daily.columns:
+            daily_points_used = int(df_daily[energy_column_selected].notna().sum()) if energy_column_selected in df_daily.columns else int(len(df_daily.index))
+            first_daily_ts = _safe_iso(df_daily["_time"].min())
+            last_daily_ts = _safe_iso(df_daily["_time"].max())
+
+        local_warnings = []
+        if energy_column_selected and energy_column_selected not in energy_columns_detected:
+            local_warnings.append(f"{dev_name}: columna energética seleccionada fuera de candidatas ({energy_column_selected})")
+
+        if total_energy_computed == 0 and energy_columns_detected and not df_daily.empty:
+            non_zero_any = False
+            for col in energy_columns_detected:
+                if col in df_daily.columns and pd.to_numeric(df_daily[col], errors="coerce").fillna(0).abs().sum() > 0:
+                    non_zero_any = True
+                    break
+            if non_zero_any:
+                local_warnings.append(f"{dev_name}: total energía 0 con columnas energéticas no nulas; posible selección errónea")
 
         return {
             "device": dev_name,
@@ -277,6 +311,13 @@ def generate_report_pdf(
             "price_input": price_input,
             "price_input_to_analyzer": price,
             "price_used_in_analyzer": price_used_in_analyzer,
+            "selected_by_rule": selected_by_rule,
+            "rejected_columns": rejected_columns,
+            "warning": energy_warning,
+            "daily_points_used": daily_points_used,
+            "first_daily_ts": first_daily_ts,
+            "last_daily_ts": last_daily_ts,
+            "local_warnings": local_warnings,
         }
 
     def _register_result(result, dev_name):
@@ -300,6 +341,15 @@ def generate_report_pdf(
         device_entry["daily_columns_detected"] = result["daily_columns_detected"]
         device_entry["raw_columns_detected"] = result["raw_columns_detected"]
         device_entry["total_energy_computed"] = result["total_energy_computed"]
+        device_entry["selected_by_rule"] = result["selected_by_rule"]
+        device_entry["rejected_columns"] = result["rejected_columns"]
+        device_entry["warning"] = result["warning"]
+        device_entry["daily_points_used"] = result["daily_points_used"]
+        device_entry["first_daily_ts"] = result["first_daily_ts"]
+        device_entry["last_daily_ts"] = result["last_daily_ts"]
+        for warn in result.get("local_warnings", []):
+            warnings.append(warn)
+
         device_entry["periods"].append({
             "section": result["section"],
             "daily_rows": result["daily_rows"],
@@ -319,6 +369,8 @@ def generate_report_pdf(
                 key = f"{dev_name} {kpi.get('suffix_name', '')}".strip()
                 if key not in device_entry["generated_kpis_keys"]:
                     device_entry["generated_kpis_keys"].append(key)
+                if kpi.get("type") == "energy" and not kpi.get("energy_column_selected"):
+                    warnings.append(f"{dev_name}: KPI energético sin trazabilidad de columna fuente")
                 device_entry["generated_kpis_detail"].append({
                     "section": result["section"],
                     "key": key,
@@ -388,6 +440,29 @@ def generate_report_pdf(
     if callback_status:
         callback_status("Generando PDF...", 1.0)
 
+    report_items = []
+    for section, section_data in final_report_data.items():
+        for key, item in section_data.items():
+            report_items.append({
+                "section": section,
+                "alias_or_title": key,
+                "device": key.split(" (", 1)[0] if isinstance(key, str) else None,
+                "metric_type": item.get("type"),
+                "main_value": item.get("main_value"),
+                "secondary_value": item.get("secondary_value"),
+                "source_energy_column": item.get("energy_column_selected"),
+                "source_total_kwh": item.get("total_energy_computed"),
+                "source_cost": item.get("cost_computed"),
+            })
+            if item.get("type") == "energy" and not item.get("energy_column_selected"):
+                warnings.append(f"{key}: item energético en reporte sin source_energy_column")
+
+    report_resolution = {
+        "sections_count": len(final_report_data),
+        "items_count": len(report_items),
+        "report_items": report_items,
+    }
+
     charts_started = time.perf_counter()
     for section_data in final_report_data.values():
         for kpi_data in section_data.values():
@@ -410,13 +485,33 @@ def generate_report_pdf(
     timings["charts"] = time.perf_counter() - charts_started
 
     if not any(section for section in final_report_data.values()):
+        warnings.append("PDF se construiría con 0 items")
         fetcher.set_debug_query_recorder(None)
         return (None, {}) if collect_debug else None
 
     try:
+        pdf_resolution = {
+            "pdf_enabled": True,
+            "output_path": output_dir,
+            "output_filename": None,
+            "report_items_rendered_count": len(report_items),
+            "rendered_items": [
+                {"alias": item.get("alias_or_title"), "main_value": item.get("main_value")}
+                for item in report_items[:50]
+            ],
+            "pdf_created": False,
+            "pdf_size_bytes": None,
+        }
         pdf_started = time.perf_counter()
         pdf_path = PDFComposer.build_report(f"{client}_{site}", final_report_data, output_dir)
         timings["pdf"] = time.perf_counter() - pdf_started
+        if pdf_path:
+            pdf_file = os.path.abspath(pdf_path)
+            pdf_resolution["output_path"] = pdf_file
+            pdf_resolution["output_filename"] = os.path.basename(pdf_file)
+            pdf_resolution["pdf_created"] = os.path.exists(pdf_file)
+            if pdf_resolution["pdf_created"]:
+                pdf_resolution["pdf_size_bytes"] = os.path.getsize(pdf_file)
         timings["total"] = time.perf_counter() - total_started
 
         debug_payload = {}
@@ -444,6 +539,24 @@ def generate_report_pdf(
                 },
             }
             query_trace = debug_queries
+
+            energy_resolution = []
+            for dev_name in devices:
+                info = device_debug.get(dev_name, {}) if isinstance(device_debug.get(dev_name), dict) else {}
+                energy_resolution.append({
+                    "device": dev_name,
+                    "candidate_energy_columns": info.get("energy_columns_detected", []),
+                    "selected_energy_column": info.get("energy_column_selected"),
+                    "selected_by_rule": info.get("selected_by_rule"),
+                    "rejected_columns": info.get("rejected_columns", []),
+                    "daily_points_used": info.get("daily_points_used"),
+                    "first_daily_ts": info.get("first_daily_ts"),
+                    "last_daily_ts": info.get("last_daily_ts"),
+                    "computed_total_kwh": info.get("total_energy_computed"),
+                    "price_used": info.get("price_input"),
+                    "computed_cost": info.get("cost_computed"),
+                    "warning": info.get("warning"),
+                })
 
             debug_payload = {
                 "inputs": {
@@ -492,9 +605,34 @@ def generate_report_pdf(
                 },
                 "sample_rows": sample_rows,
                 "final_report_data_summary": final_report_data_summary,
+                "report_resolution": report_resolution,
+                "pdf_resolution": pdf_resolution,
+                "energy_resolution": energy_resolution,
                 "timings_ms": {key: int(value * 1000) for key, value in timings.items()},
                 "device_debug": device_debug,
                 "warnings": warnings,
+            }
+            debug_payload["summary"] = {
+                "devices_requested": devices,
+                "devices_processed": processed_devices,
+                "range_requested": {
+                    "range_mode": range_mode,
+                    "range_label": range_label,
+                    "start": resolved_start,
+                    "stop": resolved_end,
+                },
+                "coverage": debug_payload.get("coverage", {}),
+                "energy_resolution": energy_resolution,
+                "report_resolution": report_resolution,
+                "pdf_resolution": pdf_resolution,
+                "warnings": warnings,
+            }
+            debug_payload["details"] = {
+                "data_sources": debug_payload.get("data_sources"),
+                "stats": debug_payload.get("stats"),
+                "sample_rows": debug_payload.get("sample_rows"),
+                "query_proof": debug_payload.get("query_proof"),
+                "device_debug": debug_payload.get("device_debug"),
             }
 
         fetcher.set_debug_query_recorder(None)
