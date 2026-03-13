@@ -146,7 +146,7 @@ Persistencia (fuente de verdad operativa del scheduler FastAPI):
 
 Los endpoints de escritura (`POST/PUT/DELETE/run` y SMTP `PUT/test`) requieren `Authorization: Bearer $AGENT_ADMIN_TOKEN`.
 
-- `GET /v1/scheduler/tasks`: lista tareas (sin secretos).
+- `GET /v1/scheduler/tasks`: lista tareas (sin secretos) e incluye estado persistido ligero (`last_status`, `last_run_ts`, `last_email_sent_at`, `last_duration_ms`, `last_error`, `in_progress_run_id`).
 - `POST /v1/scheduler/tasks`: crea tarea.
 - `PUT /v1/scheduler/tasks/{task_id}`: actualiza o habilita/deshabilita.
 - `DELETE /v1/scheduler/tasks/{task_id}`: elimina tarea.
@@ -231,3 +231,31 @@ test ! -f /etc/cron.d/sennet-agent && echo 'cron legacy ausente'
 ```
 
 Si recibes un correo incorrecto tras desplegar, casi siempre indica que el host aún no está actualizado o mantiene un servicio/cron legacy fuera de esta rama.
+
+
+### Checklist rápida de validación en BeaglePlay
+
+```bash
+# 1) timer activo
+systemctl is-active sennet-scheduler-worker.timer && systemctl is-enabled sennet-scheduler-worker.timer
+
+# 2) worker cada minuto
+systemctl list-timers --all | rg sennet-scheduler-worker
+
+# 3) detección y ejecución de tarea vencida (una sola vez)
+journalctl -u sennet-scheduler-worker.service -n 200 --no-pager
+
+# 4) verificar estado persistido de tarea (run/email/status)
+python - <<'PY2'
+import json
+p='/opt/sennet-agent/scheduled_tasks.json'
+with open(p,'r',encoding='utf-8') as f:
+    tasks=json.load(f)
+for t in tasks:
+    print(t.get('id'), t.get('last_status'), t.get('last_run_ts'), t.get('last_email_sent_at'), t.get('last_duration_ms'))
+PY2
+
+# 5) confirmar UI /programador (Tareas activas): estado + última ejecución + último email
+# 6) logs controlados (sin spam en vacío)
+journalctl -u sennet-scheduler-worker.service --since '30 min ago' --no-pager
+```

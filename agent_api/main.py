@@ -5,6 +5,8 @@ import json
 import os
 import sys
 from datetime import datetime
+from time import perf_counter
+import logging
 from pathlib import Path
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
@@ -34,7 +36,15 @@ from agent_api.schemas import (
     SmtpTestRequest,
     TenantUpsertRequest,
 )
-from agent_api.scheduler_store import list_tasks, mask_smtp, save_tasks, smtp_store
+from agent_api.scheduler_store import (
+    claim_task_execution,
+    finish_task_execution,
+    list_due_task_ids,
+    list_tasks,
+    mask_smtp,
+    save_tasks,
+    smtp_store,
+)
 from agent_api.report_time import resolve_report_time
 from agent_api.pricing import get_pricing_config, resolve_default_price
 
@@ -50,6 +60,7 @@ REPORT_TIMEOUT_SECONDS = 180
 SCHEDULER_RUN_TIMEOUT_SECONDS = 240
 
 app = FastAPI(title="SenNet Agent API", version="0.1.0")
+logger = logging.getLogger("sennet.scheduler")
 
 
 def _normalize_requested_devices(device: str, extra_devices: list[str]) -> tuple[list[str], list[str], dict[str, str]]:
@@ -479,6 +490,12 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
 
+    phase_started = perf_counter()
+    phase_metrics = {
+        "task_lookup_ms": int((phase_started - phase_started) * 1000),
+    }
+
+    t0 = perf_counter()
     auth_config = _tenant_auth_or_404(task["tenant_alias"])
     devices, device_scope_debug = _resolve_task_devices(auth_config, task)
     if not devices:
@@ -502,6 +519,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         site=task.get("site"),
         serial=task.get("serial"),
     )
+    phase_metrics["prepare_ms"] = int((perf_counter() - t0) * 1000)
 
     async def _build():
         return await asyncio.to_thread(
@@ -526,6 +544,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         )
 
     original_cwd = Path.cwd()
+    build_started = perf_counter()
     try:
         os.chdir(APP_DIR)
         build_result = await asyncio.wait_for(_build(), timeout=SCHEDULER_RUN_TIMEOUT_SECONDS)
@@ -559,6 +578,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     email_subject = None
     email_attachment_names = []
 
+    email_started = perf_counter()
     if payload.send_email:
         smtp_cfg = smtp_store().read(default={})
         required = ["server", "port", "user", "password"]
@@ -578,6 +598,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         pdf_size_bytes_emailed = safe_path.stat().st_size if pdf_exists_before_email else None
     else:
         email_sent, email_detail = False, "email_disabled_for_debug"
+    phase_metrics["email_ms"] = int((perf_counter() - email_started) * 1000)
 
     email_warnings = []
     if payload.send_email:
@@ -626,6 +647,8 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         },
         "price_scope_matched_key": price_match_key,
     })
+    phase_metrics["total_ms"] = int((perf_counter() - phase_started) * 1000)
+
     debug_payload["delivery"] = {
         "sender": "fastapi_scheduler",
         "email_sent": email_sent,
@@ -642,6 +665,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "pdf_exists_before_email": pdf_exists_before_email,
         "pdf_size_bytes_emailed": pdf_size_bytes_emailed,
         "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
+        "phase_metrics_ms": phase_metrics,
     }
     debug_payload["email_resolution"] = {
         "email_enabled": bool(payload.send_email),
@@ -709,11 +733,14 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "pdf_exists_before_email": pdf_exists_before_email,
         "pdf_size_bytes_emailed": pdf_size_bytes_emailed,
         "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
+        "phase_metrics_ms": phase_metrics,
     }
 
     all_warnings = list(debug_payload.get("warnings") or [])
     all_warnings.extend(email_warnings)
     debug_payload["warnings"] = all_warnings
+
+    phase_metrics["report_build_ms"] = int((perf_counter() - build_started) * 1000)
 
     if payload.debug:
         summary = debug_payload.get("summary") if isinstance(debug_payload.get("summary"), dict) else {}
@@ -734,6 +761,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         "email_detail": email_detail,
         "debug_path": debug_path,
         "debug": debug_payload,
+        "metrics": phase_metrics,
     }
 
 
@@ -747,7 +775,7 @@ async def scheduler_debug_task(task_id: str, payload: SchedulerRunRequest = Body
 
 
 
-def _scheduler_due_summary_item(task_id: str, status: str, detail: str | None = None, email_sent: bool | None = None):
+def _scheduler_due_summary_item(task_id: str, status: str, detail: Optional[str] = None, email_sent: Optional[bool] = None):
     item = {"task_id": task_id, "status": status}
     if detail is not None:
         item["detail"] = detail
@@ -757,20 +785,20 @@ def _scheduler_due_summary_item(task_id: str, status: str, detail: str | None = 
 
 
 @app.post("/v1/scheduler/run-due", dependencies=[Depends(_require_admin_token)])
-async def scheduler_run_due(payload: SchedulerRunRequest = Body(default=SchedulerRunRequest(debug=True))):
-    from modules.scheduler_logic import SchedulerLogic
-
-    tasks = SchedulerLogic.load_tasks()
+async def scheduler_run_due(payload: SchedulerRunRequest = Body(default=SchedulerRunRequest(debug=False))):
+    started_at = perf_counter()
+    detect_started = perf_counter()
+    due_ids = list_due_task_ids()
+    detect_ms = int((perf_counter() - detect_started) * 1000)
     results = []
+    aggregate_phase_ms = {
+        "detect_due_ms": detect_ms,
+        "run_tasks_ms": 0,
+    }
 
-    for task in tasks:
-        task_id = task.get("id")
-        if not task_id:
-            continue
-        if not SchedulerLogic.should_run(task):
-            continue
-
-        claim = SchedulerLogic.claim_execution(task_id, source="cron")
+    run_started = perf_counter()
+    for task_id in due_ids:
+        claim = claim_task_execution(task_id, source="timer")
         if not claim.get("ok"):
             results.append(_scheduler_due_summary_item(task_id, "skipped", claim.get("reason")))
             continue
@@ -779,30 +807,57 @@ async def scheduler_run_due(payload: SchedulerRunRequest = Body(default=Schedule
         sent_ok = False
         range_start = None
         range_end = None
+        status = "error"
+        detail = None
+        run_duration_ms = None
         try:
             run_result = await scheduler_run_task(task_id=task_id, payload=payload)
             sent_ok = bool(run_result.get("email_sent"))
+            status = "ok" if run_result.get("ok") else "error"
+            if not sent_ok:
+                detail = str(run_result.get("email_detail") or "email_not_sent")
             resolved = run_result.get("debug", {}).get("resolved_range", {}) if isinstance(run_result, dict) else {}
             if isinstance(resolved, dict):
                 range_start = resolved.get("start")
                 range_end = resolved.get("stop")
-            results.append(_scheduler_due_summary_item(task_id, "executed", email_sent=sent_ok))
+            item = _scheduler_due_summary_item(task_id, "executed", email_sent=sent_ok)
+            if isinstance(run_result, dict) and isinstance(run_result.get("metrics"), dict):
+                item["metrics"] = run_result.get("metrics")
+                run_duration_ms = run_result.get("metrics", {}).get("total_ms")
+            results.append(item)
         except HTTPException as exc:
-            results.append(_scheduler_due_summary_item(task_id, "failed", f"http_{exc.status_code}: {exc.detail}"))
+            detail = f"http_{exc.status_code}: {exc.detail}"
+            results.append(_scheduler_due_summary_item(task_id, "failed", detail))
         except Exception as exc:  # noqa: BLE001
-            results.append(_scheduler_due_summary_item(task_id, "failed", str(exc)))
+            detail = str(exc)
+            results.append(_scheduler_due_summary_item(task_id, "failed", detail))
         finally:
-            SchedulerLogic.finish_execution(
+            finish_task_execution(
                 task_id,
                 run_id,
+                status=status,
                 sent_ok=sent_ok,
+                detail=detail,
                 range_start=range_start,
                 range_end=range_end,
+                duration_ms=run_duration_ms,
             )
 
+    aggregate_phase_ms["run_tasks_ms"] = int((perf_counter() - run_started) * 1000)
+    duration_ms = int((perf_counter() - started_at) * 1000)
+    if due_ids:
+        logger.info(
+            "scheduler_run_due due=%s processed=%s duration_ms=%s",
+            len(due_ids),
+            len(results),
+            duration_ms,
+        )
     return {
         "ok": True,
         "processed": len(results),
+        "due_count": len(due_ids),
+        "duration_ms": duration_ms,
+        "phase_metrics_ms": aggregate_phase_ms,
         "results": results,
     }
 

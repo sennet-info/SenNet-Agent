@@ -66,6 +66,20 @@ function toHumanRange(rangeMode?: string) {
   return "Últimos 7 días";
 }
 
+function toHumanDate(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function toStatusBadge(task: SchedulerTask) {
+  if (task.in_progress_run_id || task.last_status === "running") return "Ejecutando";
+  if (task.last_status === "ok") return "OK";
+  if (task.last_status === "error") return "Error";
+  return task.enabled ? "Pendiente" : "Inactiva";
+}
+
 export default function ProgramadorPage() {
   const [tab, setTab] = useState<TabName>("new");
   const [token, setToken] = useState("");
@@ -713,12 +727,19 @@ export default function ProgramadorPage() {
                   <td className="px-3 py-2">{toHumanFrequency(task)}</td>
                   <td className="px-3 py-2">{(task.emails || []).join(", ")}</td>
                   <td className="px-3 py-2">
-                    <button
-                      className={`rounded px-2 py-1 text-xs ${task.enabled ? "bg-emerald-700" : "bg-slate-700"}`}
-                      onClick={() => toggleTaskEnabled(task)}
-                    >
-                      {task.enabled ? "Activa" : "Inactiva"}
-                    </button>
+                    <div className="space-y-1 text-xs">
+                      <button
+                        className={`rounded px-2 py-1 text-xs ${task.enabled ? "bg-emerald-700" : "bg-slate-700"}`}
+                        onClick={() => toggleTaskEnabled(task)}
+                      >
+                        {task.enabled ? "Activa" : "Inactiva"}
+                      </button>
+                      <div><strong>Estado:</strong> {toStatusBadge(task)}</div>
+                      <div><strong>Última ejecución:</strong> {toHumanDate(task.last_run_ts || task.last_run)}</div>
+                      <div><strong>Último email:</strong> {toHumanDate(task.last_email_sent_at)}</div>
+                      <div><strong>Duración:</strong> {task.last_duration_ms ? `${task.last_duration_ms} ms` : "-"}</div>
+                      {task.last_error ? <div className="text-red-300"><strong>Error:</strong> {task.last_error}</div> : null}
+                    </div>
                   </td>
                   <td className="space-x-2 px-3 py-2">
                     <button className="rounded bg-blue-700 px-2 py-1" onClick={() => runTask(task.id)}>Ejecutar ahora</button>

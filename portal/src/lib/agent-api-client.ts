@@ -64,6 +64,13 @@ export type SchedulerTask = SchedulerTaskPayload & {
   id: string;
   tenant_alias?: string;
   created_at?: string;
+  last_run?: string;
+  last_run_ts?: string;
+  last_email_sent_at?: string;
+  last_status?: "pending" | "running" | "ok" | "error";
+  last_error?: string | null;
+  last_duration_ms?: number;
+  in_progress_run_id?: string | null;
 };
 
 
