@@ -97,3 +97,28 @@ curl -fsS -H "Authorization: Bearer ${AGENT_ADMIN_TOKEN}" http://127.0.0.1:8000/
 curl -fsS http://127.0.0.1/api/agent/v1/health
 curl -fsS -H "Authorization: Bearer ${AGENT_ADMIN_TOKEN}" http://127.0.0.1/api/agent/v1/admin/tenants
 ```
+
+
+## Validación scheduler automático (systemd timer + worker)
+
+```bash
+# timer habilitado y activo
+systemctl is-enabled sennet-scheduler-worker.timer
+systemctl is-active sennet-scheduler-worker.timer
+
+# próxima/última ejecución del timer
+systemctl list-timers --all | rg sennet-scheduler-worker
+
+# ejecución del worker y resumen
+journalctl -u sennet-scheduler-worker.service -n 200 --no-pager
+
+# estado persistido de tareas
+python - <<'PY2'
+import json
+from pathlib import Path
+p=Path('/opt/sennet-agent/scheduled_tasks.json')
+items=json.loads(p.read_text(encoding='utf-8')) if p.exists() else []
+for t in items:
+    print(t.get('id'), t.get('last_status'), t.get('last_run_ts'), t.get('last_email_sent_at'), t.get('last_duration_ms'))
+PY2
+```

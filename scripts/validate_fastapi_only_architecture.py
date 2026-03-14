@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+if str(ROOT / "app") not in sys.path:
+    sys.path.insert(0, str(ROOT / "app"))
 
 
 def read(rel: str) -> str:
@@ -68,6 +73,20 @@ def main():
             active_call_sites.append(rel)
 
     assert_true(active_call_sites == ["agent_api/main.py"], f"unexpected active send_email call sites: {active_call_sites}")
+
+    # Python 3.9 compatibility: backend/worker code must not use PEP604 `| None` annotations.
+    forbidden_union_hits = []
+    for rel in ["agent_api/main.py", "agent_api/scheduler_worker.py", "agent_api/scheduler_store.py"]:
+        text = read(rel)
+        if "| None" in text:
+            forbidden_union_hits.append(rel)
+    assert_true(not forbidden_union_hits, f"python3.9 incompatible `| None` found in: {forbidden_union_hits}")
+
+    # Critical import smoke for worker runtime.
+    import importlib
+    importlib.import_module("agent_api.scheduler_store")
+    importlib.import_module("agent_api.main")
+    importlib.import_module("agent_api.scheduler_worker")
 
     print("FastAPI-only architecture validation passed")
 

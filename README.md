@@ -233,7 +233,7 @@ test ! -f /etc/cron.d/sennet-agent && echo 'cron legacy ausente'
 Si recibes un correo incorrecto tras desplegar, casi siempre indica que el host aún no está actualizado o mantiene un servicio/cron legacy fuera de esta rama.
 
 
-### Checklist rápida de validación en BeaglePlay
+### Checklist rápida de validación post-deploy (host Linux + systemd)
 
 ```bash
 # 1) timer activo

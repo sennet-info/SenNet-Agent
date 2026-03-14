@@ -2,7 +2,6 @@
 import asyncio
 import json
 import logging
-from datetime import datetime
 from time import perf_counter
 
 from agent_api.main import scheduler_run_due

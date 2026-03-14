@@ -10,7 +10,7 @@ from typing import Any, Callable, Optional
 
 from fastapi import HTTPException
 
-from modules.report_range import DEFAULT_REPORT_RANGE_MODE
+DEFAULT_REPORT_RANGE_MODE = "last_7_days"
 
 DEFAULT_SCHEDULED_PATH = Path("/opt/sennet-agent/scheduled_tasks.json")
 DEFAULT_SMTP_PATH = Path("/opt/sennet-agent/smtp_config.json")

@@ -182,7 +182,7 @@ def _build_scheduler_email_html(task: dict, range_label: str) -> str:
 
 
 
-def _write_scheduler_debug_file(pdf_path: Path, debug_payload: dict) -> str | None:
+def _write_scheduler_debug_file(pdf_path: Path, debug_payload: dict) -> Optional[str]:
     if not isinstance(debug_payload, dict):
         return None
     debug_filename = pdf_path.with_suffix(".scheduler.debug.json").name
