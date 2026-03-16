@@ -1,0 +1,7 @@
+# Drop-in override para sennet-scheduler-worker.service
+# Copia a: /etc/systemd/system/sennet-scheduler-worker.service.d/override.conf
+# Tras cambios: sudo systemctl daemon-reload && sudo systemctl restart sennet-scheduler-worker.timer
+
+[Service]
+User=debian
+Environment=PYTHONPATH=/opt/sennet-agent/repo:/opt/sennet-agent/repo/app
