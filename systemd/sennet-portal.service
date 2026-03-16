@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=debian
-WorkingDirectory=/home/debian/sennet-portal/portal
-ExecStart=/usr/bin/env HOSTNAME=0.0.0.0 PORT=3000 node /home/debian/sennet-portal/portal/.next/standalone/server.js
+User=sennet
+WorkingDirectory=/opt/sennet-portal/portal
+ExecStart=/usr/bin/env HOSTNAME=0.0.0.0 PORT=3000 node /opt/sennet-portal/portal/.next/standalone/server.js
 Restart=always
 RestartSec=2
 StandardOutput=journal

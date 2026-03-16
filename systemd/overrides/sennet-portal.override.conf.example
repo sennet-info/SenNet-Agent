@@ -1,0 +1,8 @@
+# Drop-in override para sennet-portal.service
+# Copia a: /etc/systemd/system/sennet-portal.service.d/override.conf
+
+[Service]
+User=debian
+WorkingDirectory=/home/debian/sennet-portal/portal
+ExecStart=
+ExecStart=/usr/bin/env HOSTNAME=0.0.0.0 PORT=3000 node /home/debian/sennet-portal/portal/.next/standalone/server.js
