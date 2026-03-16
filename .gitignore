@@ -13,3 +13,8 @@ __pycache__/
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# Node / build artifacts
+portal/node_modules/
+portal/.next/
+node_modules/

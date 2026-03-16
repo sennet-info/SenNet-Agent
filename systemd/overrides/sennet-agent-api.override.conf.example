@@ -1,17 +1,11 @@
-[Unit]
-Description=SenNet Agent API (FastAPI)
-After=network.target
+# Drop-in override para sennet-agent-api.service
+# Copia a: /etc/systemd/system/sennet-agent-api.service.d/override.conf
+# Tras cambios: sudo systemctl daemon-reload && sudo systemctl restart sennet-agent-api.service
 
 [Service]
-Type=simple
-User=sennet
+User=debian
 WorkingDirectory=/opt/sennet-agent/repo
-EnvironmentFile=-/opt/sennet-agent/env
 Environment=SCHEDULED_TASKS_PATH=/opt/sennet-agent/scheduled_tasks.json
 Environment=SMTP_CONFIG_PATH=/opt/sennet-agent/smtp_config.json
+ExecStart=
 ExecStart=/opt/sennet-agent/venv/bin/uvicorn agent_api.main:app --host 0.0.0.0 --port 8000
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
