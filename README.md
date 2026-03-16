@@ -197,11 +197,18 @@ python scripts/smoke_test_scheduler_api.py \
   --tenant <tenant> --client <client> --site <site> --device <device> --email test@example.com
 ```
 
+Idempotencia por slot (unit-style check):
+
+```bash
+python scripts/test_scheduler_slot_idempotency.py
+```
+
 ### Nota de operación (FastAPI-only)
 
 - El flujo productivo de informes/scheduler es único: **Portal Next.js + FastAPI**.
 - Las tareas automáticas se ejecutan por `sennet-scheduler-worker.timer` ejecutando `agent_api/scheduler_worker.py`, que dispara internamente `POST /v1/scheduler/run-due` (y este usa el mismo flujo de `run` por tarea). Para depurar una tarea aislada usa `/v1/scheduler/tasks/{task_id}/debug` y comparte el `debug_path` generado.
 - `SCHEDULED_TASKS_PATH` y `SMTP_CONFIG_PATH` son persistencia del scheduler FastAPI (no compartida con ejecutores legacy).
+- Idempotencia automática por slot temporal: `last_scheduled_slot`, `current_run_slot` y `last_completed_slot` evitan reenvíos del mismo slot aunque el timer dispare cada minuto o la ejecución tarde más de 1 minuto.
 - El envío de email de tareas se hace una sola vez en `scheduler_run_task` con plantilla HTML profesional.
 - El debug del scheduler incluye `device_debug` por dispositivo (columnas energéticas detectadas/seleccionadas, energía total, coste, KPIs) y trazabilidad PDF generado vs PDF adjuntado (`same_generated_and_emailed`).
 

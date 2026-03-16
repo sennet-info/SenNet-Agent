@@ -4,7 +4,7 @@ import os
 import tempfile
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -93,6 +93,9 @@ def _normalize_task(task: dict[str, Any]) -> dict[str, Any]:
     normalized["in_progress_run_id"] = normalized.get("in_progress_run_id")
     normalized["in_progress_source"] = normalized.get("in_progress_source")
     normalized["in_progress_started_at"] = normalized.get("in_progress_started_at")
+    normalized["last_scheduled_slot"] = normalized.get("last_scheduled_slot")
+    normalized["last_completed_slot"] = normalized.get("last_completed_slot")
+    normalized["current_run_slot"] = normalized.get("current_run_slot")
     return normalized
 
 
@@ -137,6 +140,26 @@ def _parse_iso(value: Optional[str]):
         return None
 
 
+
+
+def compute_task_slot(task: dict[str, Any], now: Optional[datetime] = None) -> Optional[str]:
+    now = now or datetime.now()
+    task_time = task.get("time") or "08:00"
+    try:
+        hh, mm = [int(part) for part in task_time.split(":", 1)]
+    except Exception:
+        return None
+
+    frequency = (task.get("frequency") or "daily").lower()
+    if frequency == "weekly":
+        weekday = int(task.get("weekday", 0))
+        delta = (now.weekday() - weekday) % 7
+        slot_date = (now - timedelta(days=delta)).date()
+        return f"weekly:{slot_date.isoformat()}:{hh:02d}:{mm:02d}"
+    if frequency == "monthly":
+        return f"monthly:{now.strftime('%Y-%m')}:{hh:02d}:{mm:02d}"
+    return f"daily:{now.date().isoformat()}:{hh:02d}:{mm:02d}"
+
 def should_run_task(task: dict[str, Any], now: Optional[datetime] = None) -> bool:
     if not task.get("enabled", True):
         return False
@@ -154,6 +177,12 @@ def should_run_task(task: dict[str, Any], now: Optional[datetime] = None) -> boo
     if task.get("frequency") == "weekly":
         if int(task.get("weekday", now.weekday())) != now.weekday():
             return False
+
+    slot = compute_task_slot(task, now=now)
+    if slot and task.get("last_completed_slot") == slot:
+        return False
+    if slot and task.get("current_run_slot") == slot:
+        return False
 
     last_run = _parse_iso(task.get("last_run_ts") or task.get("last_run"))
     if last_run and last_run.strftime("%Y-%m-%d %H:%M") == now.strftime("%Y-%m-%d %H:%M"):
@@ -176,10 +205,10 @@ def list_due_task_ids(now: Optional[datetime] = None) -> list[str]:
     return due
 
 
-def claim_task_execution(task_id: str, source: str) -> dict[str, Any]:
+def claim_task_execution(task_id: str, source: str, now: Optional[datetime] = None) -> dict[str, Any]:
     if source not in SCHEDULER_SOURCES:
         source = "manual"
-    now = datetime.now()
+    now = now or datetime.now()
     now_iso = now.isoformat(timespec="seconds")
 
     def _mutate(tasks: list[dict[str, Any]]):
@@ -193,8 +222,11 @@ def claim_task_execution(task_id: str, source: str) -> dict[str, Any]:
             if in_progress and started_at and (now - started_at).total_seconds() < LOCK_STALE_SECONDS:
                 return {"tasks": normalized, "result": {"ok": False, "reason": "in_progress", "run_id": in_progress}}
 
+            slot = compute_task_slot(task, now=now) if source == "timer" else None
             if source == "timer" and not should_run_task(task, now=now):
                 return {"tasks": normalized, "result": {"ok": False, "reason": "not_due", "run_id": None}}
+            if source == "timer" and slot and task.get("last_completed_slot") == slot:
+                return {"tasks": normalized, "result": {"ok": False, "reason": "slot_already_completed", "run_id": None}}
 
             run_id = f"{source}-{task_id[:8]}-{now.strftime('%Y%m%d%H%M%S')}"
             task["in_progress_run_id"] = run_id
@@ -204,6 +236,9 @@ def claim_task_execution(task_id: str, source: str) -> dict[str, Any]:
             if source in {"manual", "debug"}:
                 task["last_manual_run"] = now_iso
                 task["last_manual_run_id"] = run_id
+            if source == "timer" and slot:
+                task["last_scheduled_slot"] = slot
+                task["current_run_slot"] = slot
             return {"tasks": normalized, "result": {"ok": True, "reason": "claimed", "run_id": run_id}}
 
         return {"tasks": normalized, "result": {"ok": False, "reason": "task_not_found", "run_id": None}}
@@ -243,6 +278,7 @@ def finish_task_execution(
                 task["in_progress_run_id"] = None
                 task["in_progress_source"] = None
                 task["in_progress_started_at"] = None
+                task["current_run_slot"] = None
             task["last_status"] = status
             task["last_run"] = now_iso
             task["last_run_ts"] = now_iso
@@ -260,6 +296,8 @@ def finish_task_execution(
                 task["last_range_end"] = range_end
             if sent_ok:
                 task["last_email_sent_at"] = now_iso
+                if task.get("last_scheduled_slot"):
+                    task["last_completed_slot"] = task.get("last_scheduled_slot")
             result["ok"] = True
             break
         return tasks
