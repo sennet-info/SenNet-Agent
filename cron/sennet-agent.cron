@@ -1,1 +1,3 @@
-* * * * * debian /opt/sennet-agent/venv/bin/python /opt/sennet-agent/repo/app/run_report_oneshot.py > /opt/sennet-agent/cron_log.log 2>&1
+# DEPRECATED: Cron legacy scheduler disabled.
+# Scheduler automation now runs via systemd timer:
+#   sennet-scheduler-worker.timer -> agent_api/scheduler_worker.py (FastAPI scheduler_run_task path)

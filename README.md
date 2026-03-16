@@ -129,6 +129,7 @@ Rutas nuevas:
 - `/informes`
 
 En `/informes` puedes activar el toggle **Debug** antes de "Generar" para enviar `debug=true`, renderizar el panel de evidencia y habilitar el botón **Descargar debug.json**.
+En `/programador` (Tareas activas) existe además **Ejecutar con debug**, que ejecuta `run` con `debug=true` y muestra panel inline + botón **Descargar debug.json** de la última ejecución.
 
 Smoke test API:
 
@@ -138,18 +139,21 @@ python scripts/smoke_test_api.py --base-url http://127.0.0.1:8000 --tenant <tena
 
 ## Scheduler API (`/v1/scheduler/*`)
 
-Persistencia (fuente de verdad compartida con Streamlit/cron):
+Persistencia (fuente de verdad operativa del scheduler FastAPI):
 
 - `SCHEDULED_TASKS_PATH` (default `/opt/sennet-agent/scheduled_tasks.json`)
 - `SMTP_CONFIG_PATH` (default `/opt/sennet-agent/smtp_config.json`)
 
 Los endpoints de escritura (`POST/PUT/DELETE/run` y SMTP `PUT/test`) requieren `Authorization: Bearer $AGENT_ADMIN_TOKEN`.
 
-- `GET /v1/scheduler/tasks`: lista tareas (sin secretos).
+- `GET /v1/scheduler/tasks`: lista tareas (sin secretos) e incluye estado persistido ligero (`last_status`, `last_run_ts`, `last_email_sent_at`, `last_duration_ms`, `last_error`, `in_progress_run_id`).
 - `POST /v1/scheduler/tasks`: crea tarea.
 - `PUT /v1/scheduler/tasks/{task_id}`: actualiza o habilita/deshabilita.
 - `DELETE /v1/scheduler/tasks/{task_id}`: elimina tarea.
-- `POST /v1/scheduler/tasks/{task_id}/run`: ejecuta tarea oneshot.
+- `POST /v1/scheduler/tasks/{task_id}/run`: ejecuta tarea completa (resuelve rango/alcance/precio, genera PDF y envía email).
+  - La respuesta incluye `sender_path=fastapi_scheduler` para evidenciar el emisor real.
+- `POST /v1/scheduler/tasks/{task_id}/debug`: ejecuta en modo depuración (genera PDF+debug, **sin enviar email**).
+- `POST /v1/scheduler/run-due`: ejecuta únicamente tareas vencidas (usado por el worker systemd FastAPI-only).
 - `GET /v1/scheduler/smtp`: devuelve SMTP con password enmascarado.
 - `PUT /v1/scheduler/smtp`: guarda SMTP (`password` vacío mantiene el actual).
 - `POST /v1/scheduler/smtp/test`: correo de prueba.
@@ -193,8 +197,72 @@ python scripts/smoke_test_scheduler_api.py \
   --tenant <tenant> --client <client> --site <site> --device <device> --email test@example.com
 ```
 
-### Rollback sin romper Streamlit
+Idempotencia por slot (unit-style check):
 
-1. Mantener `scheduled_tasks.json` y `smtp_config.json` en `/opt/sennet-agent/`.
-2. Si desactivas el portal o API nueva, Streamlit + cron siguen leyendo los mismos JSON.
-3. Revertir deployment de portal/API no requiere migración de datos.
+```bash
+python scripts/test_scheduler_slot_idempotency.py
+```
+
+### Nota de operación (FastAPI-only)
+
+- El flujo productivo de informes/scheduler es único: **Portal Next.js + FastAPI**.
+- Las tareas automáticas se ejecutan por `sennet-scheduler-worker.timer` ejecutando `agent_api/scheduler_worker.py`, que dispara internamente `POST /v1/scheduler/run-due` (y este usa el mismo flujo de `run` por tarea). Para depurar una tarea aislada usa `/v1/scheduler/tasks/{task_id}/debug` y comparte el `debug_path` generado.
+- `SCHEDULED_TASKS_PATH` y `SMTP_CONFIG_PATH` son persistencia del scheduler FastAPI (no compartida con ejecutores legacy).
+- Idempotencia automática por slot temporal: `last_scheduled_slot`, `current_run_slot` y `last_completed_slot` evitan reenvíos del mismo slot aunque el timer dispare cada minuto o la ejecución tarde más de 1 minuto.
+- El envío de email de tareas se hace una sola vez en `scheduler_run_task` con plantilla HTML profesional.
+- El debug del scheduler incluye `device_debug` por dispositivo (columnas energéticas detectadas/seleccionadas, energía total, coste, KPIs) y trazabilidad PDF generado vs PDF adjuntado (`same_generated_and_emailed`).
+
+### Servicios recomendados en producción
+
+```bash
+sudo systemctl enable --now sennet-agent-api.service
+sudo systemctl enable --now sennet-scheduler-worker.timer
+sudo systemctl enable --now sennet-portal.service
+```
+
+Desactivar legado (evita doble envío):
+
+```bash
+sudo systemctl disable --now sennet-agent.service || true
+sudo rm -f /etc/cron.d/sennet-agent
+```
+
+### Verificación anti-emisor legacy (host)
+
+```bash
+systemctl is-active sennet-agent-api.service
+systemctl is-enabled sennet-scheduler-worker.timer
+systemctl cat sennet-scheduler-worker.service | rg 'agent_api.scheduler_worker'
+systemctl is-active sennet-agent.service || true
+test ! -f /etc/cron.d/sennet-agent && echo 'cron legacy ausente'
+```
+
+Si recibes un correo incorrecto tras desplegar, casi siempre indica que el host aún no está actualizado o mantiene un servicio/cron legacy fuera de esta rama.
+
+
+### Checklist rápida de validación post-deploy (host Linux + systemd)
+
+```bash
+# 1) timer activo
+systemctl is-active sennet-scheduler-worker.timer && systemctl is-enabled sennet-scheduler-worker.timer
+
+# 2) worker cada minuto
+systemctl list-timers --all | rg sennet-scheduler-worker
+
+# 3) detección y ejecución de tarea vencida (una sola vez)
+journalctl -u sennet-scheduler-worker.service -n 200 --no-pager
+
+# 4) verificar estado persistido de tarea (run/email/status)
+python - <<'PY2'
+import json
+p='/opt/sennet-agent/scheduled_tasks.json'
+with open(p,'r',encoding='utf-8') as f:
+    tasks=json.load(f)
+for t in tasks:
+    print(t.get('id'), t.get('last_status'), t.get('last_run_ts'), t.get('last_email_sent_at'), t.get('last_duration_ms'))
+PY2
+
+# 5) confirmar UI /programador (Tareas activas): estado + última ejecución + último email
+# 6) logs controlados (sin spam en vacío)
+journalctl -u sennet-scheduler-worker.service --since '30 min ago' --no-pager
+```

@@ -7,7 +7,9 @@ import {
   discoveryDevices,
   discoverySerials,
   discoverySites,
+  downloadDebugUrl,
   downloadUrl,
+  SchedulerRunResult,
   SchedulerTask,
   schedulerCreateTask,
   schedulerDeleteTask,
@@ -64,6 +66,20 @@ function toHumanRange(rangeMode?: string) {
   return "Últimos 7 días";
 }
 
+function toHumanDate(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function toStatusBadge(task: SchedulerTask) {
+  if (task.in_progress_run_id || task.last_status === "running") return "Ejecutando";
+  if (task.last_status === "ok") return "OK";
+  if (task.last_status === "error") return "Error";
+  return task.enabled ? "Pendiente" : "Inactiva";
+}
+
 export default function ProgramadorPage() {
   const [tab, setTab] = useState<TabName>("new");
   const [token, setToken] = useState("");
@@ -81,6 +97,8 @@ export default function ProgramadorPage() {
   const [testRecipient, setTestRecipient] = useState("");
   const [emailInput, setEmailInput] = useState("");
   const [extraDeviceCandidate, setExtraDeviceCandidate] = useState("");
+  const [lastDebugRun, setLastDebugRun] = useState<SchedulerRunResult | null>(null);
+  const [debugCopied, setDebugCopied] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -308,13 +326,30 @@ export default function ProgramadorPage() {
     }
   }
 
-  async function runTask(taskId: string) {
+  async function runTask(taskId: string, withDebug = false) {
     try {
-      const result = await schedulerRunTask(token, taskId);
+      setError("");
+      const result = await schedulerRunTask(token, taskId, withDebug ? { debug: true, debug_sample_n: 10 } : {});
+      setLastDebugRun(withDebug ? result : null);
+      setDebugCopied(false);
       window.open(downloadUrl(result.pdf_path), "_blank");
-      setOkMsg(`Ejecución OK: ${result.filename}`);
+      const recipients = result.email_recipients?.length ? result.email_recipients.join(", ") : "sin destinatarios";
+      const delivery = result.email_sent ? "Email enviado" : "Email no enviado";
+      const debugInfo = withDebug ? ` Debug: ${result.debug_path || "inline"}.` : "";
+      setOkMsg(`Ejecución OK: ${result.filename}. ${delivery} (${recipients}). ${result.email_detail || ""}.${debugInfo}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo ejecutar");
+    }
+  }
+
+  async function copyLastDebug() {
+    if (!lastDebugRun?.debug) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(lastDebugRun.debug, null, 2));
+      setDebugCopied(true);
+      setTimeout(() => setDebugCopied(false), 1800);
+    } catch {
+      setError("No se pudo copiar el debug al portapapeles");
     }
   }
 
@@ -661,7 +696,7 @@ export default function ProgramadorPage() {
               <tr>
                 <th className="px-3 py-2">Nombre</th>
                 <th className="px-3 py-2">Instalación</th>
-                <th className="px-3 py-2">Dispositivo principal</th>
+                <th className="px-3 py-2">Dispositivos / alcance</th>
                 <th className="px-3 py-2">Periodo</th>
                 <th className="px-3 py-2">Programación</th>
                 <th className="px-3 py-2">Destinatarios</th>
@@ -674,26 +709,79 @@ export default function ProgramadorPage() {
                 <tr key={task.id} className="border-t border-slate-800 align-top">
                   <td className="px-3 py-2">{task.name || "Sin nombre"}</td>
                   <td className="px-3 py-2">{task.site}</td>
-                  <td className="px-3 py-2">{task.device}</td>
+                  <td className="px-3 py-2">
+                    <div className="space-y-1">
+                      <div><strong>Principal:</strong> {task.device}</div>
+                      {task.serial ? <div className="text-xs text-slate-300"><strong>Serial:</strong> {task.serial}</div> : null}
+                      {task.extra_devices?.length ? (
+                        <div className="text-xs text-slate-300" title={task.extra_devices.join(", ")}>
+                          <strong>Extra:</strong> {task.extra_devices.join(", ")}
+                        </div>
+                      ) : null}
+                      <div className="text-xs text-slate-400">
+                        Alcance esperado: {task.tenant_alias} / {task.client} / {task.site}{task.serial ? ` / ${task.serial}` : ""}
+                      </div>
+                    </div>
+                  </td>
                   <td className="px-3 py-2">{toHumanRange(task.report_range_mode)}</td>
                   <td className="px-3 py-2">{toHumanFrequency(task)}</td>
                   <td className="px-3 py-2">{(task.emails || []).join(", ")}</td>
                   <td className="px-3 py-2">
-                    <button
-                      className={`rounded px-2 py-1 text-xs ${task.enabled ? "bg-emerald-700" : "bg-slate-700"}`}
-                      onClick={() => toggleTaskEnabled(task)}
-                    >
-                      {task.enabled ? "Activa" : "Inactiva"}
-                    </button>
+                    <div className="space-y-1 text-xs">
+                      <button
+                        className={`rounded px-2 py-1 text-xs ${task.enabled ? "bg-emerald-700" : "bg-slate-700"}`}
+                        onClick={() => toggleTaskEnabled(task)}
+                      >
+                        {task.enabled ? "Activa" : "Inactiva"}
+                      </button>
+                      <div><strong>Estado:</strong> {toStatusBadge(task)}</div>
+                      <div><strong>Última ejecución:</strong> {toHumanDate(task.last_run_ts || task.last_run)}</div>
+                      <div><strong>Último email:</strong> {toHumanDate(task.last_email_sent_at)}</div>
+                      <div><strong>Duración:</strong> {task.last_duration_ms ? `${task.last_duration_ms} ms` : "-"}</div>
+                      {task.last_error ? <div className="text-red-300"><strong>Error:</strong> {task.last_error}</div> : null}
+                    </div>
                   </td>
                   <td className="space-x-2 px-3 py-2">
                     <button className="rounded bg-blue-700 px-2 py-1" onClick={() => runTask(task.id)}>Ejecutar ahora</button>
+                    <button className="rounded bg-indigo-700 px-2 py-1" onClick={() => runTask(task.id, true)}>Ejecutar con debug</button>
                     <button className="rounded bg-red-700 px-2 py-1" onClick={() => removeTask(task.id)}>Borrar</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {tab === "tasks" && lastDebugRun?.debug && (
+        <div className="mt-4 rounded-lg border border-indigo-700/60 bg-slate-950/80 p-4 text-xs text-slate-200">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <strong className="text-indigo-300">Última ejecución debug</strong>
+            {lastDebugRun.debug_path ? (
+              <a
+                className="rounded bg-indigo-600 px-2 py-1 text-white"
+                href={downloadDebugUrl(lastDebugRun.debug_path)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Descargar debug.json
+              </a>
+            ) : null}
+            <button
+              className="rounded bg-slate-700 px-2 py-1 text-white"
+              type="button"
+              onClick={copyLastDebug}
+            >
+              Copiar debug
+            </button>
+            {debugCopied ? <span className="text-emerald-300">Copiado ✓</span> : null}
+          </div>
+          <div className="mb-2 text-slate-400">
+            Revisa aquí el flujo real ejecutado (devices, rango, pricing, query trace y delivery).
+          </div>
+          <pre className="max-h-80 overflow-auto rounded bg-black/40 p-2">
+            {JSON.stringify(lastDebugRun.debug, null, 2)}
+          </pre>
         </div>
       )}
 

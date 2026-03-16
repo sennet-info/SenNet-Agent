@@ -11,6 +11,8 @@ from modules.report_range import compute_report_range, to_flux_range
 MODE_ALIASES = {
     "last_days": "last_n_days",
     "last_n_days": "last_n_days",
+    "last_7_days": "last_n_days",
+    "last_30_days": "last_n_days",
     "full_month": "month_to_date",
     "month_to_date": "month_to_date",
     "previous_full_month": "previous_full_month",
@@ -54,6 +56,12 @@ def resolve_report_time(payload: Any, now: Optional[datetime] = None) -> Resolve
     raw_mode = (getattr(payload, "range_mode", None) or "").strip() or None
     mode = MODE_ALIASES.get(raw_mode or "", "last_n_days")
 
+    inferred_last_days = None
+    if raw_mode == "last_7_days":
+        inferred_last_days = 7
+    elif raw_mode == "last_30_days":
+        inferred_last_days = 30
+
     if getattr(payload, "start_dt", None) and getattr(payload, "end_dt", None):
         start_dt = _as_local(payload.start_dt, tzinfo)
         end_dt = _as_local(payload.end_dt, tzinfo)
@@ -63,7 +71,7 @@ def resolve_report_time(payload: Any, now: Optional[datetime] = None) -> Resolve
     elif mode == "custom":
         raise HTTPException(status_code=422, detail="Modo personalizado requiere start_dt y end_dt")
     elif mode == "last_n_days":
-        days = getattr(payload, "last_days", None)
+        days = getattr(payload, "last_days", None) or inferred_last_days
         if not days:
             range_flux = (getattr(payload, "range_flux", "") or "").strip()
             if range_flux.endswith("d") and range_flux[:-1].isdigit():

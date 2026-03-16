@@ -1,0 +1,16 @@
+[Unit]
+Description=SenNet Scheduler Worker (FastAPI-only oneshot)
+After=network-online.target sennet-agent-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=debian
+WorkingDirectory=/opt/sennet-agent/repo
+Environment="PATH=/opt/sennet-agent/venv/bin"
+Environment="PYTHONPATH=/opt/sennet-agent/repo:/opt/sennet-agent/repo/app"
+Environment="SCHEDULED_TASKS_PATH=/opt/sennet-agent/scheduled_tasks.json"
+Environment="SMTP_CONFIG_PATH=/opt/sennet-agent/smtp_config.json"
+ExecStart=/opt/sennet-agent/venv/bin/python -m agent_api.scheduler_worker
+StandardOutput=journal
+StandardError=journal

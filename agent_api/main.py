@@ -1,9 +1,12 @@
+from types import SimpleNamespace
 from typing import Optional
 import asyncio
 import json
 import os
 import sys
 from datetime import datetime
+from time import perf_counter
+import logging
 from pathlib import Path
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
@@ -33,7 +36,15 @@ from agent_api.schemas import (
     SmtpTestRequest,
     TenantUpsertRequest,
 )
-from agent_api.scheduler_store import list_tasks, mask_smtp, save_tasks, smtp_store
+from agent_api.scheduler_store import (
+    claim_task_execution,
+    finish_task_execution,
+    list_due_task_ids,
+    list_tasks,
+    mask_smtp,
+    save_tasks,
+    smtp_store,
+)
 from agent_api.report_time import resolve_report_time
 from agent_api.pricing import get_pricing_config, resolve_default_price
 
@@ -43,13 +54,73 @@ if str(APP_DIR) not in sys.path:
 from core.discovery import list_clients, list_devices, list_serials, list_sites
 from core.report import generate_report_pdf
 from modules.email_sender import EmailSender
-from modules.report_range import compute_report_range, to_flux_range
 
 MAX_DEVICES = 50
 REPORT_TIMEOUT_SECONDS = 180
 SCHEDULER_RUN_TIMEOUT_SECONDS = 240
 
 app = FastAPI(title="SenNet Agent API", version="0.1.0")
+logger = logging.getLogger("sennet.scheduler")
+
+
+def _normalize_requested_devices(device: str, extra_devices: list[str]) -> tuple[list[str], list[str], dict[str, str]]:
+    requested = []
+    discarded = []
+    reasons: dict[str, str] = {}
+
+    for raw in [device, *(extra_devices or [])]:
+        item = (raw or "").strip()
+        if not item:
+            continue
+        if item in requested:
+            discarded.append(item)
+            reasons[item] = "duplicate_request"
+            continue
+        requested.append(item)
+
+    return requested, discarded, reasons
+
+
+def _resolve_task_devices(auth_config, task: dict) -> tuple[list[str], dict]:
+    requested, discarded, discard_reasons = _normalize_requested_devices(
+        task.get("device", ""),
+        task.get("extra_devices", []),
+    )
+
+    discovered = list_devices(
+        auth_config,
+        task.get("client", ""),
+        task.get("site", ""),
+        serial=task.get("serial"),
+    )
+    discovered_index = {(item or "").strip().casefold(): item for item in discovered if (item or "").strip()}
+    resolved = []
+    for item in requested:
+        normalized = item.strip().casefold()
+        if normalized in discovered_index:
+            resolved.append(discovered_index[normalized])
+        else:
+            discarded.append(item)
+            discard_reasons[item] = "not_in_discovery_scope"
+
+    scope_debug = {
+        "requested_device": task.get("device"),
+        "requested_extra_devices": task.get("extra_devices", []),
+        "requested_serial": task.get("serial"),
+        "requested_devices_all": requested,
+        "resolved_devices": resolved,
+        "discarded_devices": discarded,
+        "discard_reasons": discard_reasons,
+        "discovered_devices": discovered,
+        "scope": {
+            "tenant": task.get("tenant_alias"),
+            "client": task.get("client"),
+            "site": task.get("site"),
+            "serial": task.get("serial"),
+        },
+    }
+    return resolved, scope_debug
+
 
 
 def _require_admin_token(authorization: Optional[str] = Header(default=None)):
@@ -79,6 +150,45 @@ def _require_admin_for_smtp_read(authorization: Optional[str] = Header(default=N
 def health():
     return {"ok": True}
 
+
+
+
+def _build_scheduler_email_html(task: dict, range_label: str) -> str:
+    return f"""
+    <html>
+    <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f9; margin: 0; padding: 20px;">
+        <div style="max-width: 640px; margin: auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border: 1px solid #e1e8ed;">
+            <div style="background: linear-gradient(135deg, #EF4444 0%, #B91C1C 100%); padding: 28px; text-align: center; color: white;">
+                <h1 style="margin: 0; font-size: 24px; letter-spacing: 0.5px;">SenNet Intelligence</h1>
+                <p style="margin: 6px 0 0 0; opacity: 0.95; font-size: 14px;">Informe energético automático</p>
+            </div>
+            <div style="padding: 28px; color: #334155; line-height: 1.6;">
+                <h2 style="color: #1e293b; margin-top: 0;">Resumen del informe</h2>
+                <p>Se ha generado un nuevo informe para la instalación <strong>{task['site']}</strong> del cliente <strong>{task['client']}</strong>.</p>
+                <div style="background-color: #f8fafc; border-left: 4px solid #EF4444; padding: 14px 16px; margin: 18px 0; border-radius: 4px;">
+                    <p style="margin: 0;"><strong>Rango:</strong> {range_label}</p>
+                    <p style="margin: 4px 0 0 0;"><strong>Dispositivo principal:</strong> {task.get('device') or '-'}</p>
+                    <p style="margin: 4px 0 0 0;"><strong>Dispositivos extra:</strong> {', '.join(task.get('extra_devices') or []) or '-'}</p>
+                    <p style="margin: 4px 0 0 0;"><strong>Serial:</strong> {task.get('serial') or '-'}</p>
+                    <p style="margin: 4px 0 0 0;"><strong>Generado:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+                </div>
+                <p>Adjunto encontrarás el PDF con el detalle energético del periodo.</p>
+                <p style="font-size:12px;color:#64748b;">Origen de envío: FastAPI Scheduler</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+
+
+def _write_scheduler_debug_file(pdf_path: Path, debug_payload: dict) -> Optional[str]:
+    if not isinstance(debug_payload, dict):
+        return None
+    debug_filename = pdf_path.with_suffix(".scheduler.debug.json").name
+    debug_file = safe_output_path(debug_filename)
+    debug_file.write_text(json.dumps(debug_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(debug_file)
 
 def _tenant_auth_or_404(tenant: str):
     try:
@@ -380,50 +490,61 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
 
-    devices = [task["device"], *task.get("extra_devices", [])]
+    phase_started = perf_counter()
+    phase_metrics = {
+        "task_lookup_ms": int((phase_started - phase_started) * 1000),
+    }
+
+    t0 = perf_counter()
+    auth_config = _tenant_auth_or_404(task["tenant_alias"])
+    devices, device_scope_debug = _resolve_task_devices(auth_config, task)
+    if not devices:
+        raise HTTPException(status_code=422, detail="Ningún dispositivo solicitado pertenece al alcance resuelto")
     if len(devices) > MAX_DEVICES:
         raise HTTPException(status_code=422, detail=f"devices excede el máximo permitido ({MAX_DEVICES})")
 
-    start_dt = None
-    end_dt = None
-    range_flux = task.get("range_flux")
-    if not range_flux:
-        if task.get("start_dt") and task.get("end_dt"):
-            start_dt = datetime.fromisoformat(task["start_dt"])
-            end_dt = datetime.fromisoformat(task["end_dt"])
-        else:
-            start_dt, end_dt = compute_report_range(task.get("report_range_mode"))
-        range_flux = to_flux_range(start_dt, end_dt)
+    scheduler_time_payload = SimpleNamespace(
+        range_mode=task.get("report_range_mode"),
+        range_flux=task.get("range_flux"),
+        last_days=None,
+        start_dt=datetime.fromisoformat(task["start_dt"]) if task.get("start_dt") else None,
+        end_dt=datetime.fromisoformat(task["end_dt"]) if task.get("end_dt") else None,
+        range_label=None,
+    )
+    resolved_time = resolve_report_time(scheduler_time_payload)
 
-    auth_config = _tenant_auth_or_404(task["tenant_alias"])
     effective_price, price_source, price_match_key = resolve_default_price(
         tenant=task.get("tenant_alias"),
         client=task.get("client"),
         site=task.get("site"),
         serial=task.get("serial"),
     )
+    phase_metrics["prepare_ms"] = int((perf_counter() - t0) * 1000)
 
     async def _build():
         return await asyncio.to_thread(
             generate_report_pdf,
-            auth_config,
-            task["client"],
-            task["site"],
-            devices,
-            range_flux,
-            effective_price,
-            task.get("serial"),
-            start_dt,
-            end_dt,
-            False,
-            None,
-            payload.max_workers,
-            payload.debug,
-            payload.debug_sample_n,
-            payload.force_recalculate,
+            auth_config=auth_config,
+            client=task["client"],
+            site=task["site"],
+            devices=devices,
+            range_flux=resolved_time.range_flux,
+            price=effective_price,
+            serial=task.get("serial"),
+            start_dt=resolved_time.start_dt,
+            end_dt=resolved_time.end_dt,
+            debug_mode=False,
+            callback_status=None,
+            max_workers=payload.max_workers,
+            collect_debug=payload.debug,
+            debug_sample_n=payload.debug_sample_n,
+            force_recalculate=payload.force_recalculate,
+            range_mode=resolved_time.range_mode,
+            range_label=resolved_time.range_label,
         )
 
     original_cwd = Path.cwd()
+    build_started = perf_counter()
     try:
         os.chdir(APP_DIR)
         build_result = await asyncio.wait_for(_build(), timeout=SCHEDULER_RUN_TIMEOUT_SECONDS)
@@ -445,23 +566,300 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
     if not safe_path.exists():
         raise HTTPException(status_code=500, detail="PDF generado no encontrado en disco")
 
-    if isinstance(debug_payload, dict):
-        debug_payload.setdefault("pricing", {})
-        debug_payload["pricing"].update({
-            "price_effective": effective_price,
-            "price_source": price_source,
-            "price_override": False,
-            "price_scope": {
-                "tenant": task.get("tenant_alias"),
-                "client": task.get("client"),
-                "site": task.get("site"),
-                "serial": task.get("serial"),
-            },
-            "price_scope_matched_key": price_match_key,
-        })
+    recipients = task.get("emails", [])
+    pdf_path_generated = str(safe_path)
+    pdf_filename_generated = safe_path.name
+    pdf_exists_after_generation = safe_path.exists()
+    pdf_size_bytes = safe_path.stat().st_size if pdf_exists_after_generation else None
+    pdf_path_emailed = None
+    pdf_filename_emailed = None
+    pdf_exists_before_email = None
+    pdf_size_bytes_emailed = None
+    email_subject = None
+    email_attachment_names = []
 
-    return {"ok": True, "pdf_path": str(safe_path), "filename": safe_path.name, "debug": debug_payload}
+    email_started = perf_counter()
+    if payload.send_email:
+        smtp_cfg = smtp_store().read(default={})
+        required = ["server", "port", "user", "password"]
+        missing = [key for key in required if not smtp_cfg.get(key)]
+        if missing:
+            raise HTTPException(status_code=422, detail=f"SMTP incompleto: faltan {', '.join(missing)}")
 
+        sender = EmailSender(smtp_cfg["server"], smtp_cfg["port"], smtp_cfg["user"], smtp_cfg["password"])
+        subject = f"📊 Informe Energético: {task['site']} ({datetime.now().strftime('%d/%m/%Y')})"
+        body = _build_scheduler_email_html(task, resolved_time.range_label)
+        email_sent, email_detail = sender.send_email(recipients, subject, body, str(safe_path))
+        email_subject = subject
+        email_attachment_names = [safe_path.name]
+        pdf_path_emailed = str(safe_path)
+        pdf_filename_emailed = safe_path.name
+        pdf_exists_before_email = safe_path.exists()
+        pdf_size_bytes_emailed = safe_path.stat().st_size if pdf_exists_before_email else None
+    else:
+        email_sent, email_detail = False, "email_disabled_for_debug"
+    phase_metrics["email_ms"] = int((perf_counter() - email_started) * 1000)
+
+    email_warnings = []
+    if payload.send_email:
+        if not pdf_exists_after_generation or not pdf_size_bytes:
+            email_warnings.append("PDF generado inexistente o vacío antes del envío")
+        if not pdf_exists_before_email or not pdf_size_bytes_emailed:
+            email_warnings.append("Adjunto de email inexistente o vacío")
+
+    if not isinstance(debug_payload, dict):
+        debug_payload = {}
+
+    debug_payload.setdefault("inputs", {})
+    debug_payload["inputs"].update({
+        "tenant": task.get("tenant_alias"),
+        "client": task.get("client"),
+        "site": task.get("site"),
+        "serial": task.get("serial"),
+        "devices": devices,
+        "range_mode": task.get("report_range_mode"),
+        "range_flux": resolved_time.range_flux,
+        "start_dt": resolved_time.start_dt.isoformat(),
+        "end_dt": resolved_time.end_dt.isoformat(),
+    })
+    debug_payload["device_scope"] = device_scope_debug
+    debug_payload["resolved_range"] = {
+        "user_mode": task.get("report_range_mode"),
+        "range_mode": resolved_time.range_mode,
+        "range_label": resolved_time.range_label,
+        "start": resolved_time.start_dt.isoformat(),
+        "stop": resolved_time.end_dt.isoformat(),
+        "range_flux": resolved_time.range_flux,
+        "timezone": resolved_time.timezone,
+        "criteria": resolved_time.criteria,
+        "adjusted": resolved_time.adjusted,
+    }
+    debug_payload.setdefault("pricing", {})
+    debug_payload["pricing"].update({
+        "price_effective": effective_price,
+        "price_source": price_source,
+        "price_override": False,
+        "price_scope": {
+            "tenant": task.get("tenant_alias"),
+            "client": task.get("client"),
+            "site": task.get("site"),
+            "serial": task.get("serial"),
+        },
+        "price_scope_matched_key": price_match_key,
+    })
+    phase_metrics["total_ms"] = int((perf_counter() - phase_started) * 1000)
+
+    debug_payload["delivery"] = {
+        "sender": "fastapi_scheduler",
+        "email_sent": email_sent,
+        "email_recipients": recipients,
+        "email_detail": email_detail,
+        "email_subject": email_subject,
+        "email_attachment_names": email_attachment_names,
+        "pdf_path_generated": pdf_path_generated,
+        "pdf_filename_generated": pdf_filename_generated,
+        "pdf_exists_after_generation": pdf_exists_after_generation,
+        "pdf_size_bytes": pdf_size_bytes,
+        "pdf_path_emailed": pdf_path_emailed,
+        "pdf_filename_emailed": pdf_filename_emailed,
+        "pdf_exists_before_email": pdf_exists_before_email,
+        "pdf_size_bytes_emailed": pdf_size_bytes_emailed,
+        "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
+        "phase_metrics_ms": phase_metrics,
+    }
+    debug_payload["email_resolution"] = {
+        "email_enabled": bool(payload.send_email),
+        "attachments": email_attachment_names,
+        "attachment_exists": bool(pdf_exists_before_email) if payload.send_email else None,
+        "attachment_size_bytes": pdf_size_bytes_emailed,
+        "email_subject": email_subject,
+        "summary_of_report_items_sent": [
+            {
+                "alias_or_title": item.get("alias_or_title"),
+                "main_value": item.get("main_value"),
+                "secondary_value": item.get("secondary_value"),
+            }
+            for item in ((debug_payload.get("report_resolution") or {}).get("report_items") or [])[:20]
+        ],
+        "warnings": email_warnings,
+    }
+
+    report_inputs = debug_payload.get("inputs") if isinstance(debug_payload.get("inputs"), dict) else {}
+    report_price = report_inputs.get("price_applied_kwh", report_inputs.get("price"))
+    report_price_pdf = report_inputs.get("price_used_in_pdf", report_price)
+    report_device_debug = debug_payload.get("device_debug") if isinstance(debug_payload.get("device_debug"), dict) else {}
+    report_devices_processed = report_inputs.get("devices_processed") if isinstance(report_inputs.get("devices_processed"), list) else []
+    report_devices_with_kpis = report_inputs.get("devices_with_kpis") if isinstance(report_inputs.get("devices_with_kpis"), list) else []
+    report_devices_without_data = report_inputs.get("devices_without_data") if isinstance(report_inputs.get("devices_without_data"), list) else []
+
+    unresolved_after_build = [dev for dev in devices if dev not in report_devices_processed]
+    if unresolved_after_build:
+        for item in unresolved_after_build:
+            device_scope_debug["discard_reasons"].setdefault(item, "not_processed_in_report")
+            if item not in device_scope_debug["discarded_devices"]:
+                device_scope_debug["discarded_devices"].append(item)
+
+    debug_payload["audit"] = {
+        "requested_device": device_scope_debug.get("requested_device"),
+        "requested_extra_devices": device_scope_debug.get("requested_extra_devices", []),
+        "requested_devices_all": device_scope_debug.get("requested_devices_all", []),
+        "resolved_devices": device_scope_debug.get("resolved_devices", []),
+        "discarded_devices": device_scope_debug.get("discarded_devices", []),
+        "discard_reasons": device_scope_debug.get("discard_reasons", {}),
+        "price_effective": effective_price,
+        "price_applied_in_report": report_price,
+        "price_used_in_pdf": report_price_pdf,
+        "price_matches_report": report_price == effective_price if isinstance(report_price, (int, float)) else None,
+        "price_used_in_pdf_matches_effective": report_price_pdf == effective_price if isinstance(report_price_pdf, (int, float)) else None,
+        "price_used_in_analyzer": {
+            dev: info.get("price_used_in_analyzer")
+            for dev, info in report_device_debug.items()
+            if isinstance(info, dict)
+        },
+        "devices_processed_in_report": report_devices_processed,
+        "devices_with_kpis": report_devices_with_kpis,
+        "devices_without_data": report_devices_without_data,
+        "device_debug": report_device_debug,
+        "email_sent": email_sent,
+        "email_recipients": recipients,
+        "email_subject": email_subject,
+        "email_attachment_names": email_attachment_names,
+        "pdf_path_generated": pdf_path_generated,
+        "pdf_filename_generated": pdf_filename_generated,
+        "pdf_exists_after_generation": pdf_exists_after_generation,
+        "pdf_size_bytes": pdf_size_bytes,
+        "pdf_path_emailed": pdf_path_emailed,
+        "pdf_filename_emailed": pdf_filename_emailed,
+        "pdf_exists_before_email": pdf_exists_before_email,
+        "pdf_size_bytes_emailed": pdf_size_bytes_emailed,
+        "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
+        "phase_metrics_ms": phase_metrics,
+    }
+
+    all_warnings = list(debug_payload.get("warnings") or [])
+    all_warnings.extend(email_warnings)
+    debug_payload["warnings"] = all_warnings
+
+    phase_metrics["report_build_ms"] = int((perf_counter() - build_started) * 1000)
+
+    if payload.debug:
+        summary = debug_payload.get("summary") if isinstance(debug_payload.get("summary"), dict) else {}
+        summary["email_resolution"] = debug_payload.get("email_resolution")
+        summary["pdf_resolution"] = debug_payload.get("pdf_resolution")
+        summary["warnings"] = all_warnings
+        debug_payload["summary"] = summary
+
+    debug_path = _write_scheduler_debug_file(safe_path, debug_payload) if payload.debug else None
+
+    return {
+        "ok": True,
+        "pdf_path": str(safe_path),
+        "filename": safe_path.name,
+        "sender_path": "fastapi_scheduler",
+        "email_sent": email_sent,
+        "email_recipients": recipients,
+        "email_detail": email_detail,
+        "debug_path": debug_path,
+        "debug": debug_payload,
+        "metrics": phase_metrics,
+    }
+
+
+@app.post("/v1/scheduler/tasks/{task_id}/debug", dependencies=[Depends(_require_admin_token)])
+async def scheduler_debug_task(task_id: str, payload: SchedulerRunRequest = Body(default=SchedulerRunRequest(debug=True, send_email=False))):
+    debug_payload = payload.model_copy(update={"debug": True, "send_email": False})
+    result = await scheduler_run_task(task_id=task_id, payload=debug_payload)
+    result["mode"] = "debug_only"
+    return result
+
+
+
+
+def _scheduler_due_summary_item(task_id: str, status: str, detail: Optional[str] = None, email_sent: Optional[bool] = None):
+    item = {"task_id": task_id, "status": status}
+    if detail is not None:
+        item["detail"] = detail
+    if email_sent is not None:
+        item["email_sent"] = email_sent
+    return item
+
+
+@app.post("/v1/scheduler/run-due", dependencies=[Depends(_require_admin_token)])
+async def scheduler_run_due(payload: SchedulerRunRequest = Body(default=SchedulerRunRequest(debug=False))):
+    started_at = perf_counter()
+    detect_started = perf_counter()
+    due_ids = list_due_task_ids()
+    detect_ms = int((perf_counter() - detect_started) * 1000)
+    results = []
+    aggregate_phase_ms = {
+        "detect_due_ms": detect_ms,
+        "run_tasks_ms": 0,
+    }
+
+    run_started = perf_counter()
+    for task_id in due_ids:
+        claim = claim_task_execution(task_id, source="timer")
+        if not claim.get("ok"):
+            results.append(_scheduler_due_summary_item(task_id, "skipped", claim.get("reason")))
+            continue
+
+        run_id = claim.get("run_id")
+        sent_ok = False
+        range_start = None
+        range_end = None
+        status = "error"
+        detail = None
+        run_duration_ms = None
+        try:
+            run_result = await scheduler_run_task(task_id=task_id, payload=payload)
+            sent_ok = bool(run_result.get("email_sent"))
+            status = "ok" if run_result.get("ok") else "error"
+            if not sent_ok:
+                detail = str(run_result.get("email_detail") or "email_not_sent")
+            resolved = run_result.get("debug", {}).get("resolved_range", {}) if isinstance(run_result, dict) else {}
+            if isinstance(resolved, dict):
+                range_start = resolved.get("start")
+                range_end = resolved.get("stop")
+            item = _scheduler_due_summary_item(task_id, "executed", email_sent=sent_ok)
+            if isinstance(run_result, dict) and isinstance(run_result.get("metrics"), dict):
+                item["metrics"] = run_result.get("metrics")
+                run_duration_ms = run_result.get("metrics", {}).get("total_ms")
+            results.append(item)
+        except HTTPException as exc:
+            detail = f"http_{exc.status_code}: {exc.detail}"
+            results.append(_scheduler_due_summary_item(task_id, "failed", detail))
+        except Exception as exc:  # noqa: BLE001
+            detail = str(exc)
+            results.append(_scheduler_due_summary_item(task_id, "failed", detail))
+        finally:
+            finish_task_execution(
+                task_id,
+                run_id,
+                status=status,
+                sent_ok=sent_ok,
+                detail=detail,
+                range_start=range_start,
+                range_end=range_end,
+                duration_ms=run_duration_ms,
+            )
+
+    aggregate_phase_ms["run_tasks_ms"] = int((perf_counter() - run_started) * 1000)
+    duration_ms = int((perf_counter() - started_at) * 1000)
+    if due_ids:
+        logger.info(
+            "scheduler_run_due due=%s processed=%s duration_ms=%s",
+            len(due_ids),
+            len(results),
+            duration_ms,
+        )
+    return {
+        "ok": True,
+        "processed": len(results),
+        "due_count": len(due_ids),
+        "duration_ms": duration_ms,
+        "phase_metrics_ms": aggregate_phase_ms,
+        "results": results,
+    }
 
 @app.get("/v1/scheduler/smtp", dependencies=[Depends(_require_admin_for_smtp_read)])
 def scheduler_get_smtp():

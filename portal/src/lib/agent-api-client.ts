@@ -64,6 +64,33 @@ export type SchedulerTask = SchedulerTaskPayload & {
   id: string;
   tenant_alias?: string;
   created_at?: string;
+  last_run?: string;
+  last_run_ts?: string;
+  last_email_sent_at?: string;
+  last_status?: "pending" | "running" | "ok" | "error";
+  last_error?: string | null;
+  last_duration_ms?: number;
+  in_progress_run_id?: string | null;
+};
+
+
+export type SchedulerRunPayload = {
+  debug?: boolean;
+  debug_sample_n?: number;
+  force_recalculate?: boolean;
+  send_email?: boolean;
+};
+
+export type SchedulerRunResult = {
+  ok: boolean;
+  pdf_path: string;
+  filename: string;
+  sender_path?: string;
+  email_sent: boolean;
+  email_recipients: string[];
+  email_detail: string;
+  debug_path?: string | null;
+  debug?: DebugPayload | null;
 };
 
 export type SmtpConfigPayload = {
@@ -212,13 +239,13 @@ export async function schedulerDeleteTask(token: string, taskId: string) {
   return parseJsonResponse<{ ok: boolean }>(response);
 }
 
-export async function schedulerRunTask(token: string, taskId: string) {
+export async function schedulerRunTask(token: string, taskId: string, payload: SchedulerRunPayload = {}) {
   const response = await fetch(buildUrl(`/v1/scheduler/tasks/${encodeURIComponent(taskId)}/run`), {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({}),
+    body: JSON.stringify(payload),
   });
-  return parseJsonResponse<{ ok: boolean; pdf_path: string; filename: string; debug?: unknown }>(response);
+  return parseJsonResponse<SchedulerRunResult>(response);
 }
 
 export async function schedulerGetSmtp(token: string) {

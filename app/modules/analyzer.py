@@ -11,6 +11,47 @@ class Analyzer:
         except: pass
         return {}
 
+
+
+    @staticmethod
+    def resolve_primary_energy_column(columns):
+        cols = [c for c in (columns or []) if isinstance(c, str)]
+        priority = ["ENEact", "active_energy", "EP_imp", "AE", "AI", "ENEactExpTot", "ENEactpTot"]
+        lower_map = {c.lower(): c for c in cols}
+        rejected = []
+
+        for name in priority:
+            matched = lower_map.get(name.lower())
+            if matched:
+                rejected = [c for c in cols if c != matched and c.lower() in {"eneact1", "eneact2", "eneact3"}]
+                return {
+                    "selected_energy_column": matched,
+                    "selected_by_rule": f"priority_match: {name}",
+                    "candidate_energy_columns": cols,
+                    "rejected_columns": rejected,
+                    "warning": None,
+                }
+
+        fallback = sorted(cols)[0] if cols else None
+        warning = None
+        if not fallback:
+            warning = "No se encontraron columnas energéticas válidas"
+        else:
+            warning = f"Sin columna prioritaria; se usa fallback ordenado: {fallback}"
+
+        return {
+            "selected_energy_column": fallback,
+            "selected_by_rule": "fallback_sorted" if fallback else "no_energy_column",
+            "candidate_energy_columns": cols,
+            "rejected_columns": [c for c in cols if c != fallback],
+            "warning": warning,
+        }
+
+    @staticmethod
+    def select_primary_energy_column(columns):
+        return Analyzer.resolve_primary_energy_column(columns).get("selected_energy_column")
+
+
     @staticmethod
     def analyze_device_dual(df_daily, df_raw, alias, price_kwh=0.15):
         kpis = []
@@ -24,16 +65,18 @@ class Analyzer:
                 if '_time' in df_cons.columns: df_cons = df_cons.set_index('_time')
                 if not pd.api.types.is_datetime64_any_dtype(df_cons.index): df_cons.index = pd.to_datetime(df_cons.index)
 
-            cols_acc = [c for c in df_cons.columns if any(k in c for k in ['ENEact', 'active_energy', 'm3', 'pulse', 'volumen'])]
+            cols_acc = [c for c in df_cons.columns if any(k in c for k in ['ENEact', 'active_energy', 'EP_imp', 'AE', 'AI', 'm3', 'pulse', 'volumen'])]
+            energy_resolution = Analyzer.resolve_primary_energy_column(cols_acc)
 
             # Si no hay daily, fallback a raw (Logica V47)
-            if not cols_acc and not df_raw.empty:
+            if not energy_resolution.get("selected_energy_column") and not df_raw.empty:
                  df_r = df_raw.copy()
                  if '_time' in df_r.columns: df_r = df_r.set_index('_time')
                  if not pd.api.types.is_datetime64_any_dtype(df_r.index): df_r.index = pd.to_datetime(df_r.index)
-                 acc_raw = [c for c in df_r.columns if any(k in c for k in ['ENEact', 'm3', 'pulse', 'in', 'out', 'personas', 'aforo'])]
-                 if acc_raw:
-                     c = acc_raw[0]
+                 acc_raw = [c for c in df_r.columns if any(k in c for k in ['ENEact', 'active_energy', 'EP_imp', 'AE', 'AI', 'm3', 'pulse', 'in', 'out', 'personas', 'aforo'])]
+                 raw_resolution = Analyzer.resolve_primary_energy_column(acc_raw)
+                 c = raw_resolution.get("selected_energy_column")
+                 if c:
                      daily = df_r[c].resample('D').max() - df_r[c].resample('D').min()
                      if daily.sum() == 0: daily = df_r[c].resample('D').sum()
                      total = daily.sum()
@@ -67,11 +110,16 @@ class Analyzer:
                             "chart_color": "#D32F2F" if unit=="kWh" else "#F59E0B",
                             "chart_profile": prof_data,
                             "type": "energy",
-                            "suffix_name": f"({c})"
+                            "suffix_name": f"({c})",
+                            "energy_column_selected": c,
+                            "energy_columns_detected": acc_raw,
+                            "energy_selection_rule": raw_resolution.get("selected_by_rule"),
+                            "energy_rejected_columns": raw_resolution.get("rejected_columns", []),
+                            "energy_warning": raw_resolution.get("warning"),
                          })
 
-            elif cols_acc:
-                target = cols_acc[0]
+            elif energy_resolution.get("selected_energy_column"):
+                target = energy_resolution.get("selected_energy_column")
                 daily = df_cons[target].fillna(0)
                 total = daily.sum()
                 cost = total * price_kwh
@@ -122,7 +170,15 @@ class Analyzer:
                     "chart_color": "#D32F2F",
                     "chart_profile": prof_data,
                     "type": "energy",
-                    "suffix_name": "(Energía)"
+                    "suffix_name": "(Energía)",
+                    "energy_column_selected": target,
+                    "energy_columns_detected": cols_acc,
+                    "total_energy_computed": float(total),
+                    "price_input": float(price_kwh),
+                    "cost_computed": float(cost),
+                    "energy_selection_rule": energy_resolution.get("selected_by_rule"),
+                    "energy_rejected_columns": energy_resolution.get("rejected_columns", []),
+                    "energy_warning": energy_resolution.get("warning"),
                 })
         except: pass
 
@@ -177,5 +233,3 @@ class Analyzer:
         except: pass
 
         return kpis
-    @staticmethod
-    def load_roles(): return {}

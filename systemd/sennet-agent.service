@@ -1,5 +1,5 @@
 [Unit]
-Description=SenNet Agent Streamlit UI
+Description=DEPRECATED SenNet Streamlit UI (disabled in FastAPI-only architecture)
 After=network-online.target
 Wants=network-online.target
 
@@ -8,9 +8,7 @@ Type=simple
 User=debian
 WorkingDirectory=/opt/sennet-agent/repo/app
 Environment="PATH=/opt/sennet-agent/venv/bin"
-ExecStart=/opt/sennet-agent/venv/bin/streamlit run app.py --server.port 8501 --server.address 0.0.0.0
-Restart=always
-RestartSec=3
+ExecStart=/bin/false
 
 [Install]
 WantedBy=multi-user.target
