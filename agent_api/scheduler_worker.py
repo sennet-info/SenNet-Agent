@@ -46,6 +46,8 @@ def main() -> None:
             # Log detallado solo cuando hay trabajo real
             results_summary = []
             for item in (result.get("results") or []):
+                if not isinstance(item, dict):
+                    continue
                 task_id = item.get("task_id", "?")
                 status = item.get("status", "?")
                 email_sent = item.get("email_sent")
