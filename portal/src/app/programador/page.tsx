@@ -737,7 +737,7 @@ export default function ProgramadorPage() {
                       <div><strong>Estado:</strong> {toStatusBadge(task)}</div>
                       <div><strong>Última ejecución:</strong> {toHumanDate(task.last_run_ts || task.last_run)}</div>
                       <div><strong>Último email:</strong> {toHumanDate(task.last_email_sent_at)}</div>
-                      <div><strong>Duración:</strong> {task.last_duration_ms ? `${task.last_duration_ms} ms` : "-"}</div>
+                      <div><strong>Duración:</strong> {task.last_duration_ms != null ? (task.last_duration_ms >= 1000 ? `${(task.last_duration_ms / 1000).toFixed(1)} s` : `${task.last_duration_ms} ms`) : "-"}</div>
                       {task.last_error ? <div className="text-red-300"><strong>Error:</strong> {task.last_error}</div> : null}
                     </div>
                   </td>

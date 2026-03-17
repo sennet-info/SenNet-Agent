@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 
 from agent_api.config import (
     APP_DIR,
+    OUTPUT_DIR,
     TenantNotFoundError,
     get_tenant_auth,
     load_energy_prices_config,
@@ -189,6 +190,25 @@ def _write_scheduler_debug_file(pdf_path: Path, debug_payload: dict) -> Optional
     debug_file = safe_output_path(debug_filename)
     debug_file.write_text(json.dumps(debug_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return str(debug_file)
+
+def _cleanup_old_output_files(max_age_days: int = 7) -> int:
+    """Elimina PDFs y debug JSONs de app/output/ con más de max_age_days días.
+    Se llama al inicio de cada ciclo de scheduler_run_due.
+    Evita saturación de disco en producción."""
+    try:
+        cutoff = datetime.now().timestamp() - (max_age_days * 86400)
+        deleted = 0
+        for f in OUTPUT_DIR.glob("*"):
+            if f.suffix in {".pdf", ".json"} and f.stat().st_mtime < cutoff:
+                f.unlink()
+                deleted += 1
+        if deleted:
+            logger.info("cleanup_output deleted=%s files older_than=%sd", deleted, max_age_days)
+        return deleted
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("cleanup_output failed: %s", exc)
+        return 0
+
 
 def _tenant_auth_or_404(tenant: str):
     try:
@@ -787,6 +807,9 @@ def _scheduler_due_summary_item(task_id: str, status: str, detail: Optional[str]
 @app.post("/v1/scheduler/run-due", dependencies=[Depends(_require_admin_token)])
 async def scheduler_run_due(payload: SchedulerRunRequest = Body(default=SchedulerRunRequest(debug=False))):
     started_at = perf_counter()
+    # Limpieza de PDFs y debug JSONs antiguos (>7 días) en cada ciclo.
+    # Coste mínimo: solo glob + stat en archivos existentes.
+    _cleanup_old_output_files(max_age_days=7)
     detect_started = perf_counter()
     due_ids = list_due_task_ids()
     detect_ms = int((perf_counter() - detect_started) * 1000)
@@ -797,11 +820,13 @@ async def scheduler_run_due(payload: SchedulerRunRequest = Body(default=Schedule
     }
 
     run_started = perf_counter()
-    for task_id in due_ids:
+
+    async def _run_one(task_id: str) -> dict:
+        """Ejecuta una tarea individual y devuelve el item de resultado.
+        Diseñado para lanzarse en paralelo con asyncio.gather."""
         claim = claim_task_execution(task_id, source="timer")
         if not claim.get("ok"):
-            results.append(_scheduler_due_summary_item(task_id, "skipped", claim.get("reason")))
-            continue
+            return _scheduler_due_summary_item(task_id, "skipped", claim.get("reason"))
 
         run_id = claim.get("run_id")
         sent_ok = False
@@ -816,7 +841,7 @@ async def scheduler_run_due(payload: SchedulerRunRequest = Body(default=Schedule
             status = "ok" if run_result.get("ok") else "error"
             if not sent_ok:
                 detail = str(run_result.get("email_detail") or "email_not_sent")
-            resolved = run_result.get("debug", {}).get("resolved_range", {}) if isinstance(run_result, dict) else {}
+            resolved = (run_result.get("debug") or {}).get("resolved_range", {}) if isinstance(run_result, dict) else {}
             if isinstance(resolved, dict):
                 range_start = resolved.get("start")
                 range_end = resolved.get("stop")
@@ -824,13 +849,13 @@ async def scheduler_run_due(payload: SchedulerRunRequest = Body(default=Schedule
             if isinstance(run_result, dict) and isinstance(run_result.get("metrics"), dict):
                 item["metrics"] = run_result.get("metrics")
                 run_duration_ms = run_result.get("metrics", {}).get("total_ms")
-            results.append(item)
+            return item
         except HTTPException as exc:
             detail = f"http_{exc.status_code}: {exc.detail}"
-            results.append(_scheduler_due_summary_item(task_id, "failed", detail))
+            return _scheduler_due_summary_item(task_id, "failed", detail)
         except Exception as exc:  # noqa: BLE001
             detail = str(exc)
-            results.append(_scheduler_due_summary_item(task_id, "failed", detail))
+            return _scheduler_due_summary_item(task_id, "failed", detail)
         finally:
             finish_task_execution(
                 task_id,
@@ -842,6 +867,12 @@ async def scheduler_run_due(payload: SchedulerRunRequest = Body(default=Schedule
                 range_end=range_end,
                 duration_ms=run_duration_ms,
             )
+
+    # Ejecutar todas las tareas vencidas en paralelo.
+    # Cada tarea tiene su propio lock por slot — no hay colisión entre ellas.
+    # Si una tarea tarda 2 min, las demás no esperan: todas arrancan a la vez.
+    parallel_results = await asyncio.gather(*[_run_one(task_id) for task_id in due_ids])
+    results.extend(parallel_results)
 
     aggregate_phase_ms["run_tasks_ms"] = int((perf_counter() - run_started) * 1000)
     duration_ms = int((perf_counter() - started_at) * 1000)
