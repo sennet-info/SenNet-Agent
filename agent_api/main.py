@@ -607,148 +607,148 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
         if not pdf_exists_before_email or not pdf_size_bytes_emailed:
             email_warnings.append("Adjunto de email inexistente o vacío")
 
-    if not isinstance(debug_payload, dict):
-        debug_payload = {}
+    phase_metrics["total_ms"] = int((perf_counter() - phase_started) * 1000)
 
-    debug_payload.setdefault("inputs", {})
-    debug_payload["inputs"].update({
-        "tenant": task.get("tenant_alias"),
-        "client": task.get("client"),
-        "site": task.get("site"),
-        "serial": task.get("serial"),
-        "devices": devices,
-        "range_mode": task.get("report_range_mode"),
-        "range_flux": resolved_time.range_flux,
-        "start_dt": resolved_time.start_dt.isoformat(),
-        "end_dt": resolved_time.end_dt.isoformat(),
-    })
-    debug_payload["device_scope"] = device_scope_debug
-    debug_payload["resolved_range"] = {
-        "user_mode": task.get("report_range_mode"),
-        "range_mode": resolved_time.range_mode,
-        "range_label": resolved_time.range_label,
-        "start": resolved_time.start_dt.isoformat(),
-        "stop": resolved_time.end_dt.isoformat(),
-        "range_flux": resolved_time.range_flux,
-        "timezone": resolved_time.timezone,
-        "criteria": resolved_time.criteria,
-        "adjusted": resolved_time.adjusted,
-    }
-    debug_payload.setdefault("pricing", {})
-    debug_payload["pricing"].update({
-        "price_effective": effective_price,
-        "price_source": price_source,
-        "price_override": False,
-        "price_scope": {
+    if payload.debug:
+        if not isinstance(debug_payload, dict):
+            debug_payload = {}
+
+        debug_payload.setdefault("inputs", {})
+        debug_payload["inputs"].update({
             "tenant": task.get("tenant_alias"),
             "client": task.get("client"),
             "site": task.get("site"),
             "serial": task.get("serial"),
-        },
-        "price_scope_matched_key": price_match_key,
-    })
-    phase_metrics["total_ms"] = int((perf_counter() - phase_started) * 1000)
+            "devices": devices,
+            "range_mode": task.get("report_range_mode"),
+            "range_flux": resolved_time.range_flux,
+            "start_dt": resolved_time.start_dt.isoformat(),
+            "end_dt": resolved_time.end_dt.isoformat(),
+        })
+        debug_payload["device_scope"] = device_scope_debug
+        debug_payload["resolved_range"] = {
+            "user_mode": task.get("report_range_mode"),
+            "range_mode": resolved_time.range_mode,
+            "range_label": resolved_time.range_label,
+            "start": resolved_time.start_dt.isoformat(),
+            "stop": resolved_time.end_dt.isoformat(),
+            "range_flux": resolved_time.range_flux,
+            "timezone": resolved_time.timezone,
+            "criteria": resolved_time.criteria,
+            "adjusted": resolved_time.adjusted,
+        }
+        debug_payload.setdefault("pricing", {})
+        debug_payload["pricing"].update({
+            "price_effective": effective_price,
+            "price_source": price_source,
+            "price_override": False,
+            "price_scope": {
+                "tenant": task.get("tenant_alias"),
+                "client": task.get("client"),
+                "site": task.get("site"),
+                "serial": task.get("serial"),
+            },
+            "price_scope_matched_key": price_match_key,
+        })
 
-    debug_payload["delivery"] = {
-        "sender": "fastapi_scheduler",
-        "email_sent": email_sent,
-        "email_recipients": recipients,
-        "email_detail": email_detail,
-        "email_subject": email_subject,
-        "email_attachment_names": email_attachment_names,
-        "pdf_path_generated": pdf_path_generated,
-        "pdf_filename_generated": pdf_filename_generated,
-        "pdf_exists_after_generation": pdf_exists_after_generation,
-        "pdf_size_bytes": pdf_size_bytes,
-        "pdf_path_emailed": pdf_path_emailed,
-        "pdf_filename_emailed": pdf_filename_emailed,
-        "pdf_exists_before_email": pdf_exists_before_email,
-        "pdf_size_bytes_emailed": pdf_size_bytes_emailed,
-        "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
-        "phase_metrics_ms": phase_metrics,
-    }
-    debug_payload["email_resolution"] = {
-        "email_enabled": bool(payload.send_email),
-        "attachments": email_attachment_names,
-        "attachment_exists": bool(pdf_exists_before_email) if payload.send_email else None,
-        "attachment_size_bytes": pdf_size_bytes_emailed,
-        "email_subject": email_subject,
-        "summary_of_report_items_sent": [
-            {
-                "alias_or_title": item.get("alias_or_title"),
-                "main_value": item.get("main_value"),
-                "secondary_value": item.get("secondary_value"),
-            }
-            for item in ((debug_payload.get("report_resolution") or {}).get("report_items") or [])[:20]
-        ],
-        "warnings": email_warnings,
-    }
+        debug_payload["delivery"] = {
+            "sender": "fastapi_scheduler",
+            "email_sent": email_sent,
+            "email_recipients": recipients,
+            "email_detail": email_detail,
+            "email_subject": email_subject,
+            "email_attachment_names": email_attachment_names,
+            "pdf_path_generated": pdf_path_generated,
+            "pdf_filename_generated": pdf_filename_generated,
+            "pdf_exists_after_generation": pdf_exists_after_generation,
+            "pdf_size_bytes": pdf_size_bytes,
+            "pdf_path_emailed": pdf_path_emailed,
+            "pdf_filename_emailed": pdf_filename_emailed,
+            "pdf_exists_before_email": pdf_exists_before_email,
+            "pdf_size_bytes_emailed": pdf_size_bytes_emailed,
+            "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
+            "phase_metrics_ms": phase_metrics,
+        }
+        debug_payload["email_resolution"] = {
+            "email_enabled": bool(payload.send_email),
+            "attachments": email_attachment_names,
+            "attachment_exists": bool(pdf_exists_before_email) if payload.send_email else None,
+            "attachment_size_bytes": pdf_size_bytes_emailed,
+            "email_subject": email_subject,
+            "summary_of_report_items_sent": [
+                {
+                    "alias_or_title": item.get("alias_or_title"),
+                    "main_value": item.get("main_value"),
+                    "secondary_value": item.get("secondary_value"),
+                }
+                for item in ((debug_payload.get("report_resolution") or {}).get("report_items") or [])[:20]
+            ],
+            "warnings": email_warnings,
+        }
 
-    report_inputs = debug_payload.get("inputs") if isinstance(debug_payload.get("inputs"), dict) else {}
-    report_price = report_inputs.get("price_applied_kwh", report_inputs.get("price"))
-    report_price_pdf = report_inputs.get("price_used_in_pdf", report_price)
-    report_device_debug = debug_payload.get("device_debug") if isinstance(debug_payload.get("device_debug"), dict) else {}
-    report_devices_processed = report_inputs.get("devices_processed") if isinstance(report_inputs.get("devices_processed"), list) else []
-    report_devices_with_kpis = report_inputs.get("devices_with_kpis") if isinstance(report_inputs.get("devices_with_kpis"), list) else []
-    report_devices_without_data = report_inputs.get("devices_without_data") if isinstance(report_inputs.get("devices_without_data"), list) else []
+        report_inputs = debug_payload.get("inputs") if isinstance(debug_payload.get("inputs"), dict) else {}
+        report_price = report_inputs.get("price_applied_kwh", report_inputs.get("price"))
+        report_price_pdf = report_inputs.get("price_used_in_pdf", report_price)
+        report_device_debug = debug_payload.get("device_debug") if isinstance(debug_payload.get("device_debug"), dict) else {}
+        report_devices_processed = report_inputs.get("devices_processed") if isinstance(report_inputs.get("devices_processed"), list) else []
+        report_devices_with_kpis = report_inputs.get("devices_with_kpis") if isinstance(report_inputs.get("devices_with_kpis"), list) else []
+        report_devices_without_data = report_inputs.get("devices_without_data") if isinstance(report_inputs.get("devices_without_data"), list) else []
 
-    unresolved_after_build = [dev for dev in devices if dev not in report_devices_processed]
-    if unresolved_after_build:
-        for item in unresolved_after_build:
-            device_scope_debug["discard_reasons"].setdefault(item, "not_processed_in_report")
-            if item not in device_scope_debug["discarded_devices"]:
-                device_scope_debug["discarded_devices"].append(item)
+        unresolved_after_build = [dev for dev in devices if dev not in report_devices_processed]
+        if unresolved_after_build:
+            for item in unresolved_after_build:
+                device_scope_debug["discard_reasons"].setdefault(item, "not_processed_in_report")
+                if item not in device_scope_debug["discarded_devices"]:
+                    device_scope_debug["discarded_devices"].append(item)
 
-    debug_payload["audit"] = {
-        "requested_device": device_scope_debug.get("requested_device"),
-        "requested_extra_devices": device_scope_debug.get("requested_extra_devices", []),
-        "requested_devices_all": device_scope_debug.get("requested_devices_all", []),
-        "resolved_devices": device_scope_debug.get("resolved_devices", []),
-        "discarded_devices": device_scope_debug.get("discarded_devices", []),
-        "discard_reasons": device_scope_debug.get("discard_reasons", {}),
-        "price_effective": effective_price,
-        "price_applied_in_report": report_price,
-        "price_used_in_pdf": report_price_pdf,
-        "price_matches_report": report_price == effective_price if isinstance(report_price, (int, float)) else None,
-        "price_used_in_pdf_matches_effective": report_price_pdf == effective_price if isinstance(report_price_pdf, (int, float)) else None,
-        "price_used_in_analyzer": {
-            dev: info.get("price_used_in_analyzer")
-            for dev, info in report_device_debug.items()
-            if isinstance(info, dict)
-        },
-        "devices_processed_in_report": report_devices_processed,
-        "devices_with_kpis": report_devices_with_kpis,
-        "devices_without_data": report_devices_without_data,
-        "device_debug": report_device_debug,
-        "email_sent": email_sent,
-        "email_recipients": recipients,
-        "email_subject": email_subject,
-        "email_attachment_names": email_attachment_names,
-        "pdf_path_generated": pdf_path_generated,
-        "pdf_filename_generated": pdf_filename_generated,
-        "pdf_exists_after_generation": pdf_exists_after_generation,
-        "pdf_size_bytes": pdf_size_bytes,
-        "pdf_path_emailed": pdf_path_emailed,
-        "pdf_filename_emailed": pdf_filename_emailed,
-        "pdf_exists_before_email": pdf_exists_before_email,
-        "pdf_size_bytes_emailed": pdf_size_bytes_emailed,
-        "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
-        "phase_metrics_ms": phase_metrics,
-    }
+        debug_payload["audit"] = {
+            "requested_device": device_scope_debug.get("requested_device"),
+            "requested_extra_devices": device_scope_debug.get("requested_extra_extras", []),
+            "requested_devices_all": device_scope_debug.get("requested_devices_all", []),
+            "resolved_devices": device_scope_debug.get("resolved_devices", []),
+            "discarded_devices": device_scope_debug.get("discarded_devices", []),
+            "discard_reasons": device_scope_debug.get("discard_reasons", {}),
+            "price_effective": effective_price,
+            "price_applied_in_report": report_price,
+            "price_used_in_pdf": report_price_pdf,
+            "price_matches_report": report_price == effective_price if isinstance(report_price, (int, float)) else None,
+            "price_used_in_pdf_matches_effective": report_price_pdf == effective_price if isinstance(report_price_pdf, (int, float)) else None,
+            "price_used_in_analyzer": {
+                dev: info.get("price_used_in_analyzer")
+                for dev, info in report_device_debug.items()
+                if isinstance(info, dict)
+            },
+            "devices_processed_in_report": report_devices_processed,
+            "devices_with_kpis": report_devices_with_kpis,
+            "devices_without_data": report_devices_without_data,
+            "device_debug": report_device_debug,
+            "email_sent": email_sent,
+            "email_recipients": recipients,
+            "email_subject": email_subject,
+            "email_attachment_names": email_attachment_names,
+            "pdf_path_generated": pdf_path_generated,
+            "pdf_filename_generated": pdf_filename_generated,
+            "pdf_exists_after_generation": pdf_exists_after_generation,
+            "pdf_size_bytes": pdf_size_bytes,
+            "pdf_path_emailed": pdf_path_emailed,
+            "pdf_filename_emailed": pdf_filename_emailed,
+            "pdf_exists_before_email": pdf_exists_before_email,
+            "pdf_size_bytes_emailed": pdf_size_bytes_emailed,
+            "same_generated_and_emailed": pdf_path_generated == pdf_path_emailed if pdf_path_emailed else None,
+            "phase_metrics_ms": phase_metrics,
+        }
 
-    all_warnings = list(debug_payload.get("warnings") or [])
-    all_warnings.extend(email_warnings)
-    debug_payload["warnings"] = all_warnings
+        all_warnings = list(debug_payload.get("warnings") or [])
+        all_warnings.extend(email_warnings)
+        debug_payload["warnings"] = all_warnings
 
-    phase_metrics["report_build_ms"] = int((perf_counter() - build_started) * 1000)
-
-    if payload.debug:
         summary = debug_payload.get("summary") if isinstance(debug_payload.get("summary"), dict) else {}
         summary["email_resolution"] = debug_payload.get("email_resolution")
         summary["pdf_resolution"] = debug_payload.get("pdf_resolution")
         summary["warnings"] = all_warnings
         debug_payload["summary"] = summary
 
+    phase_metrics["report_build_ms"] = int((perf_counter() - build_started) * 1000)
     debug_path = _write_scheduler_debug_file(safe_path, debug_payload) if payload.debug else None
 
     return {
