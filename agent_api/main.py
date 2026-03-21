@@ -293,23 +293,24 @@ async def create_report(payload: ReportRequest):
     async def _build():
         return await asyncio.to_thread(
             generate_report_pdf,
-            auth_config,
-            payload.client,
-            payload.site,
-            payload.devices,
-            resolved_time.range_flux,
-            effective_price,
-            payload.serial,
-            resolved_time.start_dt,
-            resolved_time.end_dt,
-            False,
-            None,
-            payload.max_workers,
-            payload.debug,
-            payload.debug_sample_n,
-            payload.force_recalculate,
-            resolved_time.range_mode,
-            resolved_time.range_label,
+            auth_config=auth_config,
+            client=payload.client,
+            site=payload.site,
+            devices=payload.devices,
+            range_flux=resolved_time.range_flux,
+            price=effective_price,
+            serial=payload.serial,
+            start_dt=resolved_time.start_dt,
+            end_dt=resolved_time.end_dt,
+            debug_mode=False,
+            callback_status=None,
+            max_workers=payload.max_workers,
+            collect_debug=payload.debug,
+            debug_sample_n=payload.debug_sample_n,
+            force_recalculate=payload.force_recalculate,
+            range_mode=resolved_time.range_mode,
+            range_label=resolved_time.range_label,
+            report_options=getattr(payload, 'report_options', None),
         )
 
     original_cwd = Path.cwd()
@@ -561,6 +562,7 @@ async def scheduler_run_task(task_id: str, payload: SchedulerRunRequest = Body(d
             force_recalculate=payload.force_recalculate,
             range_mode=resolved_time.range_mode,
             range_label=resolved_time.range_label,
+            report_options=task.get('report_options', None),
         )
 
     original_cwd = Path.cwd()

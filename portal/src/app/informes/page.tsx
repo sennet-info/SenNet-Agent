@@ -85,6 +85,10 @@ export default function InformesPage() {
   const [maxWorkers] = useState(() => getDefaultMaxWorkers());
   const [forceRecalculate] = useState(false);
   const [debug, setDebug] = useState(false);
+  const [reportPalette, setReportPalette] = useState("rojo");
+  const [showProfile, setShowProfile] = useState(true);
+  const [showSummary, setShowSummary] = useState(true);
+  const [showPrev, setShowPrev] = useState(false);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingClients, setLoadingClients] = useState(false);
@@ -386,6 +390,12 @@ export default function InformesPage() {
         max_workers: maxWorkers,
         force_recalculate: forceRecalculate,
         debug,
+        report_options: {
+          palette: reportPalette,
+          show_profile: showProfile,
+          show_summary: showSummary,
+          show_prev: showPrev,
+        },
         ...rangePayload,
       });
       setResult(report);
@@ -523,6 +533,39 @@ export default function InformesPage() {
         )}
       </div>
 
+      <div className="rounded border border-slate-800 p-3 space-y-3">
+        <p className="text-sm font-medium text-slate-300">Opciones del informe</p>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">Color del informe</label>
+            <select
+              value={reportPalette}
+              onChange={(e) => setReportPalette(e.target.value)}
+              className="w-full rounded border border-slate-700 bg-slate-950 p-1.5 text-sm"
+            >
+              <option value="rojo">Rojo (defecto)</option>
+              <option value="azul">Azul</option>
+              <option value="verde">Verde</option>
+              <option value="morado">Morado</option>
+              <option value="oscuro">Oscuro</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-2 justify-end">
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={showProfile} onChange={(e) => setShowProfile(e.target.checked)} />
+              Perfil horario
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={showSummary} onChange={(e) => setShowSummary(e.target.checked)} />
+              Tabla resumen
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={showPrev} onChange={(e) => setShowPrev(e.target.checked)} />
+              Comparar mes anterior
+            </label>
+          </div>
+        </div>
+      </div>
       <div className="flex flex-wrap items-center gap-3">
         <button className="rounded bg-emerald-700 px-4 py-2" disabled={loading || selected.length === 0} onClick={generateReport} type="button">
           {loading ? "Generando..." : "Generar"}

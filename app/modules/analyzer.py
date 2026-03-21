@@ -2,234 +2,225 @@ import pandas as pd
 import os
 import json
 
+COMFORT_RANGES = {
+    "TEMP": (18.0, 26.0), "HUM": (40.0, 70.0),
+    "CO2":  (400.0, 1000.0), "PM": (0.0, 25.0), "PRES": (950.0, 1050.0),
+}
+SENSOR_UNITS  = {"TEMP":"ºC","HUM":"%","CO2":"ppm","PM":"µg/m³","PRES":"hPa"}
+SENSOR_COLORS = {"TEMP":"#E53935","HUM":"#1565C0","CO2":"#37474F","PM":"#6A1B9A","PRES":"#2E7D32"}
+SENSOR_LABELS = {"TEMP":"Temperatura","HUM":"Humedad","CO2":"CO₂","PM":"Partículas","PRES":"Presión"}
+
 class Analyzer:
+
     @staticmethod
     def load_roles():
         try:
             if os.path.exists('device_roles.json'):
-                with open('device_roles.json', 'r') as f: return json.load(f)
+                with open('device_roles.json','r') as f: return json.load(f)
         except: pass
         return {}
 
-
-
     @staticmethod
     def resolve_primary_energy_column(columns):
-        cols = [c for c in (columns or []) if isinstance(c, str)]
-        priority = ["ENEact", "active_energy", "EP_imp", "AE", "AI", "ENEactExpTot", "ENEactpTot"]
-        lower_map = {c.lower(): c for c in cols}
-        rejected = []
-
+        cols = [c for c in (columns or []) if isinstance(c,str)]
+        priority = ["ENEact","active_energy","EP_imp","AE","AI","ENEactExpTot","ENEactpTot"]
+        lower_map = {c.lower():c for c in cols}
         for name in priority:
             matched = lower_map.get(name.lower())
             if matched:
-                rejected = [c for c in cols if c != matched and c.lower() in {"eneact1", "eneact2", "eneact3"}]
-                return {
-                    "selected_energy_column": matched,
-                    "selected_by_rule": f"priority_match: {name}",
-                    "candidate_energy_columns": cols,
-                    "rejected_columns": rejected,
-                    "warning": None,
-                }
-
+                rejected = [c for c in cols if c!=matched and c.lower() in {"eneact1","eneact2","eneact3"}]
+                return {"selected_energy_column":matched,"selected_by_rule":f"priority_match:{name}",
+                        "candidate_energy_columns":cols,"rejected_columns":rejected,"warning":None}
         fallback = sorted(cols)[0] if cols else None
-        warning = None
-        if not fallback:
-            warning = "No se encontraron columnas energéticas válidas"
-        else:
-            warning = f"Sin columna prioritaria; se usa fallback ordenado: {fallback}"
-
-        return {
-            "selected_energy_column": fallback,
-            "selected_by_rule": "fallback_sorted" if fallback else "no_energy_column",
-            "candidate_energy_columns": cols,
-            "rejected_columns": [c for c in cols if c != fallback],
-            "warning": warning,
-        }
+        return {"selected_energy_column":fallback,
+                "selected_by_rule":"fallback_sorted" if fallback else "no_energy_column",
+                "candidate_energy_columns":cols,
+                "rejected_columns":[c for c in cols if c!=fallback],
+                "warning":f"Sin columna prioritaria; fallback:{fallback}" if fallback else "No hay columnas energéticas"}
 
     @staticmethod
     def select_primary_energy_column(columns):
         return Analyzer.resolve_primary_energy_column(columns).get("selected_energy_column")
 
+    @staticmethod
+    def _detect_kind(col):
+        c = col.upper()
+        if any(k in c for k in ["TEMP","DEGC"]): return "TEMP"
+        if any(k in c for k in ["HUM","RH"]):    return "HUM"
+        if "CO2" in c or "PPM" in c:             return "CO2"
+        if any(k in c for k in ["PM1","PM2","PM10","UG"]): return "PM"
+        if "PRES" in c:                          return "PRES"
+        return ""
 
     @staticmethod
-    def analyze_device_dual(df_daily, df_raw, alias, price_kwh=0.15):
-        kpis = []
-        roles = Analyzer.load_roles()
+    def _daily_chart(series):
+        return {t.strftime('%Y-%m-%d'): round(float(v),1)
+                for t,v in series.items() if v > 0}
 
-        # --- 1. ENERGIA / CONSUMOS ---
+    @staticmethod
+    def _hourly_profile(df_r, col, accumulator=True):
         try:
-            df_cons = pd.DataFrame()
-            if not df_daily.empty:
-                df_cons = df_daily.copy()
-                if '_time' in df_cons.columns: df_cons = df_cons.set_index('_time')
-                if not pd.api.types.is_datetime64_any_dtype(df_cons.index): df_cons.index = pd.to_datetime(df_cons.index)
+            if col not in df_r.columns: return {}
+            s = df_r[col]
+            if accumulator:
+                h = s.resample('h').max() - s.resample('h').min()
+                if h.sum()==0: h = s.resample('h').last().diff()
+                h = h.fillna(0).clip(lower=0)
+            else:
+                h = s.resample('h').mean().fillna(0)
+            if h.sum()==0: return {}
+            prof = h.groupby(h.index.hour).mean()
+            return {f"{k}h": round(float(v),3) for k,v in prof.items()}
+        except: return {}
 
-            cols_acc = [c for c in df_cons.columns if any(k in c for k in ['ENEact', 'active_energy', 'EP_imp', 'AE', 'AI', 'm3', 'pulse', 'volumen'])]
-            energy_resolution = Analyzer.resolve_primary_energy_column(cols_acc)
+    @staticmethod
+    def _prep_df(df):
+        d = df.copy()
+        if '_time' in d.columns: d = d.set_index('_time')
+        if not pd.api.types.is_datetime64_any_dtype(d.index):
+            d.index = pd.to_datetime(d.index)
+        return d
 
-            # Si no hay daily, fallback a raw (Logica V47)
-            if not energy_resolution.get("selected_energy_column") and not df_raw.empty:
-                 df_r = df_raw.copy()
-                 if '_time' in df_r.columns: df_r = df_r.set_index('_time')
-                 if not pd.api.types.is_datetime64_any_dtype(df_r.index): df_r.index = pd.to_datetime(df_r.index)
-                 acc_raw = [c for c in df_r.columns if any(k in c for k in ['ENEact', 'active_energy', 'EP_imp', 'AE', 'AI', 'm3', 'pulse', 'in', 'out', 'personas', 'aforo'])]
-                 raw_resolution = Analyzer.resolve_primary_energy_column(acc_raw)
-                 c = raw_resolution.get("selected_energy_column")
-                 if c:
-                     daily = df_r[c].resample('D').max() - df_r[c].resample('D').min()
-                     if daily.sum() == 0: daily = df_r[c].resample('D').sum()
-                     total = daily.sum()
-                     if total > 0:
-                         chart = {}
-                         for t, v in daily.items():
-                             if v > 0: chart[t.strftime('%Y-%m-%d')] = round(v, 1)
-                         unit = "Unids"
-                         if "m3" in c: unit = "m3"
-                         elif "ENE" in c: unit = "kWh"
+    @staticmethod
+    def analyze_device_dual(df_daily, df_raw, alias, price_kwh=0.15,
+                             df_daily_prev=None, df_raw_prev=None):
+        kpis = []
 
-                         # Perfil desde raw (directo)
-                         prof_data = {}
-                         try:
-                             h = df_r[c].resample('h').max() - df_r[c].resample('h').min()
-                             if h.sum()==0: h = df_r[c].resample('h').last().diff()
-                             h = h.fillna(0).clip(lower=0)
-                             if h.sum() > 0:
-                                 prof = h.groupby(h.index.hour).mean()
-                                 prof_data = {f"{k}h": round(v, 2) for k, v in prof.items()}
-                         except: pass
+        df_cons = Analyzer._prep_df(df_daily) if not df_daily.empty else pd.DataFrame()
+        df_r    = Analyzer._prep_df(df_raw)   if not df_raw.empty   else pd.DataFrame()
 
-                         kpis.append({
-                            "title": f"{alias} ({c})",
-                            "title_chart": f"Consumo ({total:.0f} {unit})",
-                            "main_value": f"{int(total)} {unit}",
-                            "sub_value": "ACUMULADO",
-                            "secondary_value": "",
-                            "chart_data": chart,
-                            "chart_type": "bar",
-                            "chart_color": "#D32F2F" if unit=="kWh" else "#F59E0B",
-                            "chart_profile": prof_data,
-                            "type": "energy",
-                            "suffix_name": f"({c})",
-                            "energy_column_selected": c,
-                            "energy_columns_detected": acc_raw,
-                            "energy_selection_rule": raw_resolution.get("selected_by_rule"),
-                            "energy_rejected_columns": raw_resolution.get("rejected_columns", []),
-                            "energy_warning": raw_resolution.get("warning"),
-                         })
+        # ── 1. ENERGÍA ───────────────────────────────────────────────────────
+        try:
+            cols_acc = [c for c in df_cons.columns if any(k in c for k in
+                        ['ENEact','active_energy','EP_imp','AE','AI','m3','pulse','volumen'])]
+            eres = Analyzer.resolve_primary_energy_column(cols_acc)
 
-            elif energy_resolution.get("selected_energy_column"):
-                target = energy_resolution.get("selected_energy_column")
-                daily = df_cons[target].fillna(0)
-                total = daily.sum()
-                cost = total * price_kwh
-                chart = {}
-                for t, v in daily.items():
-                    if v > 0: chart[t.strftime('%Y-%m-%d')] = round(v, 1)
+            if not eres.get("selected_energy_column") and not df_r.empty:
+                acc_raw = [c for c in df_r.columns if any(k in c for k in
+                           ['ENEact','active_energy','EP_imp','AE','AI','m3','pulse','in','out','personas','aforo'])]
+                rres = Analyzer.resolve_primary_energy_column(acc_raw)
+                c = rres.get("selected_energy_column")
+                if c:
+                    daily = df_r[c].resample('D').max() - df_r[c].resample('D').min()
+                    if daily.sum()==0: daily = df_r[c].resample('D').sum()
+                    total = daily.sum()
+                    if total > 0:
+                        unit = "m³" if "m3" in c else ("kWh" if "ENE" in c else "ud")
+                        prev_chart = {}
+                        if df_raw_prev is not None and not df_raw_prev.empty:
+                            try:
+                                dp = Analyzer._prep_df(df_raw_prev)
+                                if c in dp.columns:
+                                    pd_ = dp[c].resample('D').max()-dp[c].resample('D').min()
+                                    prev_chart = Analyzer._daily_chart(pd_)
+                            except: pass
+                        kpis.append({
+                            "title":f"{alias} ({c})","title_chart":f"Consumo ({total:.0f} {unit})",
+                            "main_value":f"{int(total)} {unit}","secondary_value":"",
+                            "label_main":"Acumulado","label_sec":"—",
+                            "chart_data":Analyzer._daily_chart(daily),"chart_type":"bar",
+                            "chart_color":"#E53935" if unit=="kWh" else "#F57F17",
+                            "chart_unit":unit,
+                            "chart_profile":Analyzer._hourly_profile(df_r,c,accumulator=True),
+                            "prev_chart_data":prev_chart,"type":"energy","suffix_name":f"({c})",
+                            "energy_column_selected":c,"energy_selection_rule":rres.get("selected_by_rule"),
+                            "energy_warning":rres.get("warning"),
+                        })
 
-                # --- PERFIL INTELIGENTE ---
-                # Buscamos en raw la columna que mas se parezca al target o que sea Energia
-                prof_data = {}
-                try:
-                    if not df_raw.empty:
-                        df_r = df_raw.copy()
-                        if '_time' in df_r.columns: df_r = df_r.set_index('_time')
-                        if not pd.api.types.is_datetime64_any_dtype(df_r.index): df_r.index = pd.to_datetime(df_r.index)
-
-                        # Intento 1: Nombre exacto
-                        raw_candidates = [c for c in df_r.columns if target in c]
-                        # Intento 2: Cualquier energia
-                        if not raw_candidates: raw_candidates = [c for c in df_r.columns if 'ENE' in c or 'active' in c]
-
-                        if raw_candidates:
-                            rc = raw_candidates[0]
-                            # Calculo Horario
-                            h = df_r[rc].resample('h').max() - df_r[rc].resample('h').min()
-                            # Fallback diff
-                            if h.sum() == 0: h = df_r[rc].resample('h').last().diff()
-
-                            h = h.fillna(0).clip(lower=0)
-                            if h.sum() > 0:
-                                prof = h.groupby(h.index.hour).mean()
-                                prof_data = {f"{k}h": round(v, 2) for k, v in prof.items()}
-                except: pass
-
-                # Fallback Plano (Solo si fallo todo lo anterior)
-                if not prof_data:
-                    avg = total/24 if total > 0 else 0
-                    prof_data = {f"{h}h": round(avg, 2) for h in range(24)}
-
+            elif eres.get("selected_energy_column"):
+                target = eres.get("selected_energy_column")
+                daily  = df_cons[target].fillna(0)
+                total  = daily.sum()
+                cost   = total * price_kwh
+                prof   = {}
+                if not df_r.empty:
+                    rc = next((c for c in df_r.columns if target in c), None)
+                    if not rc: rc = next((c for c in df_r.columns if 'ENE' in c or 'active' in c), None)
+                    if rc: prof = Analyzer._hourly_profile(df_r, rc, accumulator=True)
+                if not prof:
+                    avg = total/24 if total>0 else 0
+                    prof = {f"{h}h": round(avg,2) for h in range(24)}
+                prev_chart = {}
+                if df_daily_prev is not None and not df_daily_prev.empty:
+                    try:
+                        dp = Analyzer._prep_df(df_daily_prev)
+                        if target in dp.columns:
+                            prev_chart = Analyzer._daily_chart(dp[target].fillna(0))
+                    except: pass
                 kpis.append({
-                    "title": f"{alias} (Energía)",
-                    "title_chart": f"Consumo ({total:.0f} kWh)",
-                    "main_value": f"{int(total)} kWh",
-                    "sub_value": "CONSUMO",
-                    "secondary_value": f"{cost:.2f} €",
-                    "chart_data": chart,
-                    "chart_type": "bar",
-                    "chart_color": "#D32F2F",
-                    "chart_profile": prof_data,
-                    "type": "energy",
-                    "suffix_name": "(Energía)",
-                    "energy_column_selected": target,
-                    "energy_columns_detected": cols_acc,
-                    "total_energy_computed": float(total),
-                    "price_input": float(price_kwh),
-                    "cost_computed": float(cost),
-                    "energy_selection_rule": energy_resolution.get("selected_by_rule"),
-                    "energy_rejected_columns": energy_resolution.get("rejected_columns", []),
-                    "energy_warning": energy_resolution.get("warning"),
+                    "title":f"{alias} (Energía)","title_chart":f"Consumo ({total:.0f} kWh)",
+                    "main_value":f"{int(total)} kWh","secondary_value":f"{cost:.2f} €",
+                    "label_main":"Consumo","label_sec":"Coste estimado",
+                    "chart_data":Analyzer._daily_chart(daily),"chart_type":"bar",
+                    "chart_color":"#E53935","chart_unit":"kWh","chart_profile":prof,
+                    "prev_chart_data":prev_chart,"type":"energy","suffix_name":"(Energía)",
+                    "energy_column_selected":target,"total_energy_computed":float(total),
+                    "price_input":float(price_kwh),"cost_computed":float(cost),
+                    "energy_selection_rule":eres.get("selected_by_rule"),
+                    "energy_warning":eres.get("warning"),
                 })
         except: pass
 
-        # --- 2. SENSORES AMBIENTALES (Igual que V47) ---
+        # ── 2. SENSORES ──────────────────────────────────────────────────────
         try:
-            if not df_raw.empty:
-                df_r = df_raw.copy()
-                if '_time' in df_r.columns: df_r = df_r.set_index('_time')
-                if not pd.api.types.is_datetime64_any_dtype(df_r.index): df_r.index = pd.to_datetime(df_r.index)
-
-                sensor_keywords = ['TEMP', 'HUM', 'CO2', 'PRES', 'Temp', 'Humi', 'ppm', 'degC', 'PM1', 'PM2.5', 'PM10', 'ug/m3', 'particulas']
-                cols_sensor = [c for c in df_r.columns if any(k in c for k in sensor_keywords)]
-
-                for c in cols_sensor:
+            if not df_r.empty:
+                sensor_kw = ['TEMP','HUM','CO2','PRES','Temp','Humi','ppm','degC',
+                             'PM1','PM2.5','PM10','ug/m3','particulas']
+                cols_s = [c for c in df_r.columns if any(k in c for k in sensor_kw)]
+                for c in cols_s:
                     try:
-                        d_avg = df_r[c].resample('D').mean().fillna(0)
-                        val_avg = d_avg.mean()
-                        val_min = df_r[c].min()
-                        val_max = df_r[c].max()
-
-                        if val_avg > 0:
-                             chart_s = {}
-                             for t, v in d_avg.items():
-                                 chart_s[t.strftime('%Y-%m-%d')] = round(v, 1)
-
-                             unit_s = ""
-                             color_s = "#1976D2"
-                             if "TEMP" in c.upper():
-                                 unit_s = "ºC"; color_s = "#E53935"
-                             elif "HUM" in c.upper():
-                                 unit_s = "%"; color_s = "#039BE5"
-                             elif "CO2" in c.upper():
-                                 unit_s = "ppm"; color_s = "#546E7A"
-                             elif "PM" in c.upper():
-                                 unit_s = "µg/m³"; color_s = "#8E24AA"
-                             elif "PRES" in c.upper():
-                                 unit_s = "hPa"; color_s = "#43A047"
-
-                             kpis.append({
-                                "title": f"{alias} ({c})",
-                                "main_value": f"{val_avg:.1f} {unit_s}",
-                                "sub_value": "PROMEDIO",
-                                "secondary_value": f"Min: {val_min:.0f} | Max: {val_max:.0f}",
-                                "secondary_label": "RANGO",
-                                "chart_data": chart_s,
-                                "chart_type": "line",
-                                "chart_color": color_s,
-                                "type": "sensor",
-                                "suffix_name": f"({c})"
-                             })
+                        d_avg   = df_r[c].resample('D').mean().fillna(0)
+                        val_avg = float(d_avg.mean())
+                        val_min = float(df_r[c].min())
+                        val_max = float(df_r[c].max())
+                        if val_avg <= 0: continue
+                        kind    = Analyzer._detect_kind(c)
+                        unit_s  = SENSOR_UNITS.get(kind,"")
+                        color_s = SENSOR_COLORS.get(kind,"#1565C0")
+                        label_s = SENSOR_LABELS.get(kind,c)
+                        comfort = COMFORT_RANGES.get(kind)
+                        gauge_data = {
+                            "value":round(val_avg,1),
+                            "vmin": round(min(val_min, comfort[0] if comfort else val_min),1),
+                            "vmax": round(max(val_max, comfort[1] if comfort else val_max),1),
+                            "unit":unit_s,"label":label_s,
+                        }
+                        kpis.append({
+                            "title":f"{alias} ({c})",
+                            "main_value":f"{val_avg:.1f} {unit_s}",
+                            "secondary_value":f"Min {val_min:.1f} · Max {val_max:.1f} {unit_s}",
+                            "label_main":f"Promedio {label_s}","label_sec":"Rango del período",
+                            "chart_data":Analyzer._daily_chart(d_avg),"chart_type":"line",
+                            "chart_color":color_s,"chart_unit":unit_s,
+                            "chart_profile":Analyzer._hourly_profile(df_r,c,accumulator=False),
+                            "gauge_data":gauge_data,
+                            "comfort_range":list(comfort) if comfort else None,
+                            "type":"sensor","sensor_kind":kind,"suffix_name":f"({c})",
+                        })
                     except: continue
         except: pass
 
         return kpis
+
+    @staticmethod
+    def build_summary_rows(all_kpis):
+        rows = []
+        for kpi in all_kpis:
+            trend = "="
+            try:
+                curr = kpi.get("chart_data",{})
+                prev = kpi.get("prev_chart_data",{})
+                if curr and prev:
+                    ca = sum(curr.values())/len(curr)
+                    pa = sum(prev.values())/len(prev)
+                    if ca > pa*1.05:   trend="+"
+                    elif ca < pa*0.95: trend="-"
+            except: pass
+            rows.append({
+                "device":kpi.get("title",""),
+                "type":"Energía" if kpi.get("type")=="energy" else "Sensor",
+                "main_value":kpi.get("main_value","—"),
+                "secondary_value":kpi.get("secondary_value","—"),
+                "trend":trend,
+            })
+        return rows
