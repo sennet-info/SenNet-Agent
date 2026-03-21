@@ -38,6 +38,12 @@ export type ReportPayload = {
   debug_sample_n?: number;
   max_workers?: number;
   force_recalculate?: boolean;
+  report_options?: {
+    palette?: string;
+    show_profile?: boolean;
+    show_summary?: boolean;
+    show_prev?: boolean;
+  };
 };
 
 export type SchedulerTaskPayload = {

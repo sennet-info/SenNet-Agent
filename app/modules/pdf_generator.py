@@ -1,92 +1,212 @@
-from jinja2 import Environment, FileSystemLoader
 from weasyprint import HTML, CSS
 import os
 from datetime import datetime
+from modules.visualizer import Visualizer, BRAND_PALETTES
+from modules.analyzer import Analyzer
+
+PALETTES = {
+    "rojo":   {"main":"#E53935","dark":"#B71C1C","light":"#FFEBEE","border":"#FFCDD2"},
+    "azul":   {"main":"#1565C0","dark":"#0D47A1","light":"#E3F2FD","border":"#BBDEFB"},
+    "verde":  {"main":"#2E7D32","dark":"#1B5E20","light":"#E8F5E9","border":"#C8E6C9"},
+    "oscuro": {"main":"#263238","dark":"#1A1A2E","light":"#ECEFF1","border":"#B0BEC5"},
+    "morado": {"main":"#6A1B9A","dark":"#4A148C","light":"#F3E5F5","border":"#CE93D8"},
+}
+
+def _get_css(palette="rojo"):
+    p = PALETTES.get(palette, PALETTES["rojo"])
+    return f"""
+@page {{
+    size: A4;
+    margin: 20mm 18mm 20mm 18mm;
+    @top-right {{
+        content: "Pag " counter(page) " / " counter(pages);
+        font-family: Helvetica, sans-serif; font-size: 8pt; color: #6C757D;
+    }}
+}}
+* {{ box-sizing: border-box; }}
+body {{ font-family: Helvetica, Arial, sans-serif; color: #1A1A2E; margin: 0; line-height: 1.5; font-size: 10pt; }}
+.report-header {{ display: flex; justify-content: space-between; align-items: flex-end;
+                  border-bottom: 2.5px solid {p['main']}; padding-bottom: 8px; margin-bottom: 24px; }}
+.logo {{ font-weight: bold; font-size: 22pt; letter-spacing: -0.5px; line-height: 1; }}
+.logo .sen {{ color: #000; }} .logo .net {{ color: #9E9E9E; }}
+.logo .bi  {{ font-size: 13pt; color: {p['main']}; margin-left: 3px; }}
+.header-meta {{ font-size: 8.5pt; color: #6C757D; text-align: right; line-height: 1.7; }}
+.section {{ padding-top: 0; }}
+.section + .section {{ page-break-before: always; padding-top: 4mm; }}
+.section-title {{ font-size: 15pt; font-weight: 700; color: #1A1A2E;
+                  padding-left: 10px; border-left: 4px solid {p['main']};
+                  margin: 0 0 16px 0; }}
+.card {{ background: #fff; border: 1px solid #DEE2E6; border-radius: 8px;
+         padding: 16px 18px 14px; margin-bottom: 20px; break-inside: avoid;
+         box-shadow: 0 1px 4px rgba(0,0,0,0.07); }}
+.card-header {{ font-size: 11pt; font-weight: 700; color: #1A1A2E;
+                padding-bottom: 8px; border-bottom: 1px solid #DEE2E6; margin-bottom: 14px; }}
+.type-tag {{ display: inline-block; font-size: 7pt; font-weight: 700; text-transform: uppercase;
+             letter-spacing: 0.5px; padding: 2px 8px; border-radius: 20px; margin-left: 8px; vertical-align: middle; }}
+.tag-energy {{ background: {p['light']}; color: {p['dark']}; }}
+.tag-sensor {{ background: #E3F2FD; color: #1565C0; }}
+.kpi-row {{ display: flex; gap: 14px; margin-bottom: 16px; }}
+.kpi-item {{ flex: 1; padding: 12px 16px; border-radius: 6px; text-align: center;
+             border: 1px solid {p['border']}; background: {p['light']}; }}
+.kpi-item.sensor {{ background: #E3F2FD; border-color: #BBDEFB; }}
+.kpi-val {{ font-size: 18pt; font-weight: 700; line-height: 1.2; color: {p['dark']}; }}
+.kpi-val.cost {{ color: {p['main']}; }}
+.kpi-val.sensor {{ color: #1565C0; }}
+.kpi-lbl {{ font-size: 7.5pt; color: #6C757D; text-transform: uppercase; letter-spacing: 0.4px; margin-top: 5px; }}
+.chart-wrap {{ text-align: center; margin-top: 14px; }}
+img.chart {{ max-width: 100%; border-radius: 5px; border: 1px solid #DEE2E6; }}
+.summary-section {{ page-break-before: always; padding-top: 4mm; }}
+.summary-title {{ font-size: 13pt; font-weight: 700; color: #1A1A2E;
+                  margin-bottom: 12px; padding-left: 10px; border-left: 4px solid #37474F; }}
+.no-data {{ background: #FFFDE7; border: 1px solid #FFE082; border-radius: 6px;
+            padding: 10px 14px; color: #F57F17; font-size: 9pt; }}
+.footer {{ font-size: 7.5pt; color: #6C757D; text-align: center;
+           border-top: 1px solid #DEE2E6; padding-top: 5px; margin-top: 24px; }}
+"""
+
+def _img(b64):
+    if not b64: return ""
+    return f'<img class="chart" src="data:image/png;base64,{b64}"/>'
+
+def _render_charts(kpi, options, brand_color=None):
+    ktype      = kpi.get("type", "energy")
+    chart_data = kpi.get("chart_data", {})
+    unit       = kpi.get("chart_unit", "kWh")
+    title      = kpi.get("title_chart", "")
+    prof       = kpi.get("chart_profile", {})
+    prev       = kpi.get("prev_chart_data", {})
+    sensor_col = kpi.get("suffix_name", "")
+    comfort    = kpi.get("comfort_range")
+    enriched   = dict(kpi)
+    show_prev    = options.get("show_prev", False)
+    show_profile = options.get("show_profile", True)
+
+    if ktype == "energy":
+        enriched["chart_img_1"] = Visualizer.create_bar_chart(
+            data=chart_data, title_chart=title, unit=unit,
+            prev_data=prev if (show_prev and prev) else None,
+            brand_color=brand_color,
+        )
+    else:
+        enriched["chart_img_1"] = Visualizer.create_line_chart(
+            data=chart_data, title_chart=title, unit=unit,
+            sensor_col=sensor_col,
+            ref_min=comfort[0] if comfort else None,
+            ref_max=comfort[1] if comfort else None,
+        )
+
+    if show_profile and prof:
+        enriched["chart_img_2"] = Visualizer.create_hourly_profile(
+            data=prof,
+            unit="kW" if ktype == "energy" else unit,
+            sensor_col=sensor_col,
+            brand_color=brand_color if ktype == "energy" else None,
+        )
+
+    gauge_d = kpi.get("gauge_data")
+    if gauge_d and ktype == "sensor":
+        enriched["gauge_img"] = Visualizer.create_gauge(
+            value=gauge_d["value"], vmin=gauge_d["vmin"], vmax=gauge_d["vmax"],
+            unit=gauge_d.get("unit",""), label=gauge_d.get("label",""),
+            sensor_col=sensor_col,
+        )
+    return enriched
+
+def _card_html(alias, kpi):
+    ktype   = kpi.get("type","energy")
+    tag_cls = "tag-energy" if ktype=="energy" else "tag-sensor"
+    tag_lbl = "Energía"    if ktype=="energy" else "Sensor"
+    cls     = "sensor"     if ktype=="sensor" else ""
+    main_val = kpi.get("main_value","—")
+    sec_val  = kpi.get("secondary_value","—")
+    lbl_main = kpi.get("label_main","Valor principal")
+    lbl_sec  = kpi.get("label_sec","Información")
+    kpi_html = f"""
+    <div class="kpi-row">
+        <div class="kpi-item {cls}">
+            <div class="kpi-val {cls}">{main_val}</div>
+            <div class="kpi-lbl">{lbl_main}</div>
+        </div>
+        <div class="kpi-item {cls}">
+            <div class="kpi-val cost">{sec_val if sec_val else '—'}</div>
+            <div class="kpi-lbl">{lbl_sec}</div>
+        </div>
+    </div>"""
+    charts = ""
+    c1 = kpi.get("chart_img_1")
+    c2 = kpi.get("chart_img_2")
+    g  = kpi.get("gauge_img")
+    if c1: charts += f'<div class="chart-wrap">{_img(c1)}</div>'
+    if c2: charts += f'<div class="chart-wrap">{_img(c2)}</div>'
+    if g and not c2: charts += f'<div class="chart-wrap">{_img(g)}</div>'
+    return f"""
+    <div class="card">
+        <div class="card-header">{alias}<span class="type-tag {tag_cls}">{tag_lbl}</span></div>
+        {kpi_html}{charts}
+    </div>"""
 
 class PDFComposer:
+
     @staticmethod
-    def build_report(profile_name, report_data, output_dir):
-        # PLANTILLA CORPORATIVA V6 (Dinamica)
-        html_template = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <style>
-                @page {
-                    size: A4; margin: 20mm; margin-top: 30mm; background-color: white;
-                    @top-right { content: "Página " counter(page); font-family: Arial; font-size: 9pt; color: #7f8c8d; }
-                }
-                body { font-family: 'Helvetica', sans-serif; color: #2c3e50; margin: 0; line-height: 1.5; }
-                .header-cnt { position: absolute; top: -15mm; left: 0; right: 0; border-bottom: 2px solid #e74c3c; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end; }
-                .logo-box { font-family: sans-serif; font-weight: bold; font-size: 24pt; letter-spacing: -1px; }
-                .part-sen { color: #000000; } .part-net { color: #95a5a6; } 
-                .section { page-break-before: always; }
-                .section:first-of-type { page-break-before: auto; }
-                .section-title { margin-top: 20px; margin-bottom: 15px; padding-left: 10px; border-left: 4px solid #e74c3c; color: #2c3e50; font-size: 16pt; font-weight: 700; }
-                .card { background: #fdfdfd; border: 1px solid #bdc3c7; border-radius: 6px; padding: 15px; margin-bottom: 20px; break-inside: avoid; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-                .card-header { border-bottom: 1px solid #ecf0f1; padding-bottom: 8px; margin-bottom: 12px; font-weight: bold; font-size: 12pt; color: #34495e; }
-                .kpi-row { display: flex; gap: 20px; margin-bottom: 15px; }
-                .kpi-item { flex: 1; background: #ecf0f1; padding: 10px; border-radius: 4px; text-align: center; }
-                .kpi-val { font-size: 16pt; font-weight: bold; color: #2980b9; }
-                .kpi-lbl { font-size: 8pt; color: #7f8c8d; text-transform: uppercase; margin-top: 4px; }
-                .chart-container { text-align: center; margin-top: 10px; }
-                img { max-width: 100%; border: 1px solid #ecf0f1; border-radius: 4px; }
-                .footer { position: fixed; bottom: 0; left: 0; right: 0; border-top: 1px solid #ecf0f1; padding-top: 5px; font-size: 8pt; color: #95a5a6; text-align: center; }
-            </style>
-        </head>
-        <body>
-            <div class="header-cnt">
-                <div class="logo-box"><span class="part-sen">Sen</span><span class="part-net">Net</span><span style="font-size:14pt; color:#e74c3c;"> Energy BI</span></div>
-                <div style="font-size: 10pt; color: #7f8c8d; text-align: right;">CLIENTE: {{ client }}<br>FECHA: {{ date }}</div>
-            </div>
+    def build_report(profile_name, report_data, output_dir,
+                     all_kpis=None, options=None):
+        if options is None: options = {}
+        palette      = options.get("palette", "rojo")
+        show_summary = options.get("show_summary", True)
+        p            = PALETTES.get(palette, PALETTES["rojo"])
+        brand_color  = p["main"]
+        now    = datetime.now().strftime("%d/%m/%Y %H:%M")
+        client = profile_name.upper()
 
-            {% for section_title, devices in data.items() %}
-                <div class="section">
-                <div class="section-title">{{ section_title }}</div>
-                {% if not devices %}
-                <div class="card">
-                    <div class="card-header">Sin datos para este periodo</div>
-                </div>
-                {% endif %}
-                {% for alias, kpi in devices.items() %}
-                <div class="card">
-                    <div class="card-header">{{ alias }}</div>
-                    {% if kpi.get('main_value') %}
-                    <div class="kpi-row">
-                        <div class="kpi-item">
-                            <div class="kpi-val" style="color:#2c3e50">{{ kpi.main_value }}</div>
-                            <!-- ETIQUETA DINAMICA 1 -->
-                            <div class="kpi-lbl">{{ kpi.get('label_main', 'Valor Principal') }}</div>
-                        </div>
-                        <div class="kpi-item">
-                            <div class="kpi-val" style="color:#e74c3c">{{ kpi.secondary_value if kpi.secondary_value else '-' }}</div>
-                             <!-- ETIQUETA DINAMICA 2 -->
-                            <div class="kpi-lbl">{{ kpi.get('label_sec', 'Información Secundaria') }}</div>
-                        </div>
-                    </div>
-                    {% endif %}
-                    
-                    {% if kpi.get('chart_img_1') %}
-                    <div class="chart-container"><img src="data:image/png;base64,{{ kpi.chart_img_1 }}" /></div>
-                    {% endif %}
-                    {% if kpi.get('chart_img_2') %}
-                    <div class="chart-container" style="margin-top:10px"><img src="data:image/png;base64,{{ kpi.chart_img_2 }}" /></div>
-                    {% endif %}
-                </div>
-                {% endfor %}
-                </div>
-            {% endfor %}
+        header_html = f"""<div class="report-header">
+    <div class="logo"><span class="sen">Sen</span><span class="net">Net</span><span class="bi"> Energy BI</span></div>
+    <div class="header-meta">CLIENTE: {client}<br>FECHA: {now}</div>
+</div>"""
 
-            <div class="footer">SenNet IoT Solutions - Confidential Report - generated by AI Agent</div>
-        </body>
-        </html>
-        """
-        env = Environment(loader=FileSystemLoader('.'))
-        render = env.from_string(html_template).render(client=profile_name.upper(), data=report_data, date=datetime.now().strftime("%d/%m/%Y %H:%M"))
+        sections_html = ""
+        first = True
+        all_rendered = []
 
-        filename = f"Report_{profile_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        for section_title, devices in report_data.items():
+            inner = ""
+            if not devices:
+                inner = '<div class="no-data">Sin datos disponibles para este período.</div>'
+            else:
+                for alias, kpi in devices.items():
+                    enriched = _render_charts(kpi, options, brand_color=brand_color)
+                    all_rendered.append(enriched)
+                    inner += _card_html(alias, enriched)
+            header_block = header_html if first else ""
+            first = False
+            sections_html += (
+                f'<div class="section">'
+                f'{header_block}'
+                f'<div class="section-title">{section_title}</div>'
+                f'{inner}'
+                f'</div>\n'
+            )
+
+        summary_html = ""
+        if show_summary:
+            src  = all_kpis if all_kpis else all_rendered
+            rows = Analyzer.build_summary_rows(src)
+            img  = Visualizer.create_summary_table(rows)
+            if img:
+                summary_html = f"""<div class="summary-section">
+    <div class="summary-title">Resumen del informe</div>
+    <div class="chart-wrap">{_img(img)}</div>
+</div>"""
+
+        html = f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"></head>
+<body>
+{sections_html}
+{summary_html}
+<div class="footer">SenNet IoT Solutions · Confidential Report · generated by AI Agent</div>
+</body></html>"""
+
         if not os.path.exists(output_dir): os.makedirs(output_dir)
+        filename    = f"Report_{profile_name}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
         output_path = os.path.join(output_dir, filename)
-        HTML(string=render).write_pdf(output_path)
+        HTML(string=html).write_pdf(output_path, stylesheets=[CSS(string=_get_css(palette))])
         return output_path
