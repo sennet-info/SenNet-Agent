@@ -55,6 +55,8 @@ body {{ font-family: Helvetica, Arial, sans-serif; color: #1A1A2E; margin: 0; li
 .kpi-lbl {{ font-size: 7.5pt; color: #6C757D; text-transform: uppercase; letter-spacing: 0.4px; margin-top: 5px; }}
 .chart-wrap {{ text-align: center; margin-top: 14px; }}
 img.chart {{ max-width: 100%; border-radius: 5px; border: 1px solid #DEE2E6; }}
+.prev-warning {{ background: #FFF3E0; border-left: 3px solid #FF9800; border-radius: 4px;
+                 padding: 6px 10px; color: #E65100; font-size: 8pt; margin-top: 10px; }}
 .summary-section {{ page-break-before: always; padding-top: 4mm; }}
 .summary-title {{ font-size: 13pt; font-weight: 700; color: #1A1A2E;
                   margin-bottom: 12px; padding-left: 10px; border-left: 4px solid #37474F; }}
@@ -121,6 +123,7 @@ def _card_html(alias, kpi):
     sec_val  = kpi.get("secondary_value","—")
     lbl_main = kpi.get("label_main","Valor principal")
     lbl_sec  = kpi.get("label_sec","Información")
+
     kpi_html = f"""
     <div class="kpi-row">
         <div class="kpi-item {cls}">
@@ -128,17 +131,23 @@ def _card_html(alias, kpi):
             <div class="kpi-lbl">{lbl_main}</div>
         </div>
         <div class="kpi-item {cls}">
-            <div class="kpi-val cost">{sec_val if sec_val else '—'}</div>
+            <div class="kpi-val cost">{sec_val if sec_val else "—"}</div>
             <div class="kpi-lbl">{lbl_sec}</div>
         </div>
     </div>"""
+
     charts = ""
     c1 = kpi.get("chart_img_1")
     c2 = kpi.get("chart_img_2")
     g  = kpi.get("gauge_img")
+    prev_warn = kpi.get("prev_no_data_warning","")
+
     if c1: charts += f'<div class="chart-wrap">{_img(c1)}</div>'
+    if prev_warn:
+        charts += f'<div class="prev-warning">&#9888; {prev_warn}</div>'
     if c2: charts += f'<div class="chart-wrap">{_img(c2)}</div>'
     if g and not c2: charts += f'<div class="chart-wrap">{_img(g)}</div>'
+
     return f"""
     <div class="card">
         <div class="card-header">{alias}<span class="type-tag {tag_cls}">{tag_lbl}</span></div>
@@ -164,7 +173,7 @@ class PDFComposer:
 </div>"""
 
         sections_html = ""
-        first = True
+        first        = True
         all_rendered = []
 
         for section_title, devices in report_data.items():
@@ -173,9 +182,11 @@ class PDFComposer:
                 inner = '<div class="no-data">Sin datos disponibles para este período.</div>'
             else:
                 for alias, kpi in devices.items():
+                    kpi["_section"] = section_title
                     enriched = _render_charts(kpi, options, brand_color=brand_color)
                     all_rendered.append(enriched)
                     inner += _card_html(alias, enriched)
+
             header_block = header_html if first else ""
             first = False
             sections_html += (
@@ -189,10 +200,11 @@ class PDFComposer:
         summary_html = ""
         if show_summary:
             src  = all_kpis if all_kpis else all_rendered
-            rows = Analyzer.build_summary_rows(src)
-            img  = Visualizer.create_summary_table(rows)
-            if img:
-                summary_html = f"""<div class="summary-section">
+            if src:
+                rows = Analyzer.build_summary_rows(src)
+                img  = Visualizer.create_summary_table(rows)
+                if img:
+                    summary_html = f"""<div class="summary-section">
     <div class="summary-title">Resumen del informe</div>
     <div class="chart-wrap">{_img(img)}</div>
 </div>"""
