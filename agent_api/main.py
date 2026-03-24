@@ -57,7 +57,7 @@ from core.report import generate_report_pdf
 from modules.email_sender import EmailSender
 
 MAX_DEVICES = 50
-REPORT_TIMEOUT_SECONDS = 180
+REPORT_TIMEOUT_SECONDS = 480
 SCHEDULER_RUN_TIMEOUT_SECONDS = 240
 
 app = FastAPI(title="SenNet Agent API", version="0.1.0")

@@ -89,6 +89,7 @@ export default function InformesPage() {
   const [showProfile, setShowProfile] = useState(true);
   const [showSummary, setShowSummary] = useState(true);
   const [showPrev, setShowPrev] = useState(false);
+  const [showHeatmap, setShowHeatmap] = useState(false);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingClients, setLoadingClients] = useState(false);
@@ -395,6 +396,7 @@ export default function InformesPage() {
           show_profile: showProfile,
           show_summary: showSummary,
           show_prev: showPrev,
+          show_heatmap: showHeatmap,
         },
         ...rangePayload,
       });
@@ -562,6 +564,10 @@ export default function InformesPage() {
             <label className="inline-flex items-center gap-2 text-sm">
               <input type="checkbox" checked={showPrev} onChange={(e) => setShowPrev(e.target.checked)} />
               Comparar mes anterior
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={showHeatmap} onChange={(e) => setShowHeatmap(e.target.checked)} />
+              Heatmap semanal
             </label>
           </div>
         </div>

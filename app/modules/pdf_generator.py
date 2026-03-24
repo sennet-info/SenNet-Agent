@@ -26,7 +26,8 @@ def _get_css(palette="rojo"):
 * {{ box-sizing: border-box; }}
 body {{ font-family: Helvetica, Arial, sans-serif; color: #1A1A2E; margin: 0; line-height: 1.5; font-size: 10pt; }}
 .report-header {{ display: flex; justify-content: space-between; align-items: flex-end;
-                  border-bottom: 2.5px solid {p['main']}; padding-bottom: 8px; margin-bottom: 24px; }}
+                  border-bottom: 2.5px solid {p['main']}; padding-bottom: 8px; margin-bottom: 24px;
+                  page-break-after: avoid; }}
 .logo {{ font-weight: bold; font-size: 22pt; letter-spacing: -0.5px; line-height: 1; }}
 .logo .sen {{ color: #000; }} .logo .net {{ color: #9E9E9E; }}
 .logo .bi  {{ font-size: 13pt; color: {p['main']}; margin-left: 3px; }}
@@ -35,7 +36,7 @@ body {{ font-family: Helvetica, Arial, sans-serif; color: #1A1A2E; margin: 0; li
 .section + .section {{ page-break-before: always; padding-top: 4mm; }}
 .section-title {{ font-size: 15pt; font-weight: 700; color: #1A1A2E;
                   padding-left: 10px; border-left: 4px solid {p['main']};
-                  margin: 0 0 16px 0; }}
+                  margin: 0 0 16px 0; page-break-after: avoid; }}
 .card {{ background: #fff; border: 1px solid #DEE2E6; border-radius: 8px;
          padding: 16px 18px 14px; margin-bottom: 20px; break-inside: avoid;
          box-shadow: 0 1px 4px rgba(0,0,0,0.07); }}
@@ -82,6 +83,7 @@ def _render_charts(kpi, options, brand_color=None):
     enriched   = dict(kpi)
     show_prev    = options.get("show_prev", False)
     show_profile = options.get("show_profile", True)
+    show_heatmap = options.get("show_heatmap", False)
 
     if ktype == "energy":
         enriched["chart_img_1"] = Visualizer.create_bar_chart(
@@ -112,6 +114,16 @@ def _render_charts(kpi, options, brand_color=None):
             unit=gauge_d.get("unit",""), label=gauge_d.get("label",""),
             sensor_col=sensor_col,
         )
+
+    if show_heatmap and ktype == "energy":
+        heatmap_d = kpi.get("heatmap_data")
+        if heatmap_d:
+            enriched["heatmap_img"] = Visualizer.create_heatmap_weekly(
+                heatmap_data=heatmap_d,
+                unit=unit,
+                brand_color=brand_color,
+            )
+
     return enriched
 
 def _card_html(alias, kpi):
@@ -136,17 +148,19 @@ def _card_html(alias, kpi):
         </div>
     </div>"""
 
-    charts = ""
     c1 = kpi.get("chart_img_1")
     c2 = kpi.get("chart_img_2")
     g  = kpi.get("gauge_img")
+    hm = kpi.get("heatmap_img")
     prev_warn = kpi.get("prev_no_data_warning","")
 
+    charts = ""
     if c1: charts += f'<div class="chart-wrap">{_img(c1)}</div>'
     if prev_warn:
         charts += f'<div class="prev-warning">&#9888; {prev_warn}</div>'
     if c2: charts += f'<div class="chart-wrap">{_img(c2)}</div>'
     if g and not c2: charts += f'<div class="chart-wrap">{_img(g)}</div>'
+    if hm: charts += f'<div class="chart-wrap">{_img(hm)}</div>'
 
     return f"""
     <div class="card">

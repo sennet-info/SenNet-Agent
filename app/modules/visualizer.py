@@ -95,7 +95,7 @@ class Visualizer:
                 while len(pvals)<len(x_labs): pvals.append(0)
                 ax.bar(x+w/2, pvals, width=w, color=light_c, alpha=0.85,
                        edgecolor=main_c, linewidth=0.5, label="Mes anterior", zorder=3)
-                ax.legend(fontsize=7, framealpha=0.9, loc="upper right")
+                ax.legend(fontsize=7, framealpha=0.9, loc="upper right", bbox_to_anchor=(0.99, 0.99))
             if len(x_labs)<=16:
                 for bar in bars:
                     h = bar.get_height()
@@ -181,25 +181,27 @@ class Visualizer:
         except: return None
 
     @staticmethod
-    def create_heatmap_weekly(df_raw_indexed, column, unit="kWh", sensor_col="", brand_color=None):
+    def create_heatmap_weekly(heatmap_data, unit="kWh", sensor_col="", brand_color=None):
+        """
+        heatmap_data: dict {hora(int): {dow(int): valor}} generado por Analyzer._heatmap_data.
+        Ligero, sin dependencia de DataFrame en tiempo de renderizado.
+        """
         try:
-            if df_raw_indexed is None or df_raw_indexed.empty: return None
-            if column not in df_raw_indexed.columns: return None
-            pal = _detect_palette(sensor_col, unit, brand_color=brand_color)
+            if not heatmap_data: return None
+            pal  = _detect_palette(sensor_col, unit, brand_color=brand_color)
             cmap = mcolors.LinearSegmentedColormap.from_list("sn",[THEME["bg"],pal["light"],pal["main"]])
-            df = df_raw_indexed[[column]].copy()
-            df["hour"] = df.index.hour; df["dow"] = df.index.dayofweek
-            pivot = df.groupby(["hour","dow"])[column].mean().unstack(fill_value=0)
-            for d in range(7):
-                if d not in pivot.columns: pivot[d]=0
-            pivot = pivot[sorted(pivot.columns)]
-            fig, ax = plt.subplots(figsize=(6.5,4.2))
-            _style(fig,ax)
-            im = ax.imshow(pivot.values, aspect="auto", cmap=cmap, interpolation="nearest", origin="upper")
+            # Reconstruir matriz 24x7
+            matrix = np.zeros((24, 7))
+            for h in range(24):
+                for d in range(7):
+                    matrix[h, d] = heatmap_data.get(h, {}).get(d, 0.0)
+            fig, ax = plt.subplots(figsize=(6.5, 4.2))
+            _style(fig, ax)
+            im = ax.imshow(matrix, aspect="auto", cmap=cmap, interpolation="nearest", origin="upper")
             ax.set_xticks(range(7))
-            ax.set_xticklabels(["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"],fontsize=8)
-            ax.set_yticks([0,4,8,12,16,20,23])
-            ax.set_yticklabels(["00h","04h","08h","12h","16h","20h","23h"],fontsize=7)
+            ax.set_xticklabels(["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"], fontsize=8)
+            ax.set_yticks([0, 4, 8, 12, 16, 20, 23])
+            ax.set_yticklabels(["00h","04h","08h","12h","16h","20h","23h"], fontsize=7)
             ax.set_ylabel("Hora", fontsize=8, labelpad=4, color=THEME["muted"])
             ax.set_title(f"Heatmap semanal — {pal['label']} ({unit})",
                          fontsize=9.5, fontweight="bold", color=THEME["text"], pad=8)
@@ -256,7 +258,7 @@ class Visualizer:
                 cols = ["Dispositivo","Tipo","Total / Promedio","Coste / Info","Tendencia"]
 
             n = len(rows)
-            fig, ax = plt.subplots(figsize=(7.2, max(2.0, 0.48*n+1.0)))
+            fig, ax = plt.subplots(figsize=(9.0, max(2.0, 0.48*n+1.0)))
             fig.patch.set_facecolor(THEME["bg"]); ax.set_facecolor(THEME["bg"]); ax.axis("off")
 
             cell_data, cell_colors, trend_info = [], [], []
@@ -285,6 +287,7 @@ class Visualizer:
             tbl = ax.table(cellText=cell_data, colLabels=cols,
                            cellColours=cell_colors, loc="center", cellLoc="left")
             tbl.auto_set_font_size(False); tbl.set_fontsize(7.5); tbl.scale(1,1.7)
+            tbl.auto_set_column_width(col=list(range(len(cols))))
 
             for j in range(len(cols)):
                 tbl[0,j].set_facecolor(THEME["text"])
