@@ -305,3 +305,59 @@ class Visualizer:
             plt.tight_layout(pad=0.4)
             return _save(fig)
         except: return None
+
+    @staticmethod
+    def create_cumulative_line(data, unit="kWh", brand_color=None):
+        """Línea acumulada de consumo del mes."""
+        try:
+            if not data: return None
+            pal = _detect_palette("", unit, brand_color=brand_color)
+            main_c, light_c = pal["main"], pal["light"]
+            sorted_items = sorted(data.items())
+            labels = [k[-5:] for k, _ in sorted_items]
+            values = [float(v) for _, v in sorted_items]
+            cumvals = []
+            acc = 0.0
+            for v in values:
+                acc += v
+                cumvals.append(acc)
+            fig, ax = plt.subplots(figsize=(6.5, 2.7))
+            _style(fig, ax)
+            x = np.arange(len(labels))
+            ax.fill_between(x, cumvals, alpha=0.15, color=main_c)
+            ax.plot(x, cumvals, color=main_c, linewidth=1.8, marker="o", markersize=3)
+            ax.set_xticks(x[::max(1, len(x)//10)])
+            ax.set_xticklabels(labels[::max(1, len(x)//10)], rotation=45, ha="right", fontsize=7)
+            ax.set_ylabel(f"Acumulado ({unit})", fontsize=7.5, labelpad=4, color=THEME["muted"])
+            ax.set_title(f"Consumo acumulado ({unit})", fontsize=9.5, fontweight="bold", color=THEME["text"], pad=8)
+            total = cumvals[-1] if cumvals else 0
+            ax.annotate(f"{total:.1f} {unit}", xy=(x[-1], cumvals[-1]),
+                        xytext=(-30, 8), textcoords="offset points",
+                        fontsize=8, fontweight="bold", color=main_c)
+            plt.tight_layout(pad=0.8)
+            return _save(fig)
+        except: return None
+
+    @staticmethod
+    def create_top_days(data, unit="kWh", brand_color=None, top_n=7):
+        """Ranking horizontal de los N días de mayor consumo."""
+        try:
+            if not data: return None
+            pal = _detect_palette("", unit, brand_color=brand_color)
+            main_c, light_c = pal["main"], pal["light"]
+            sorted_items = sorted(data.items(), key=lambda x: float(x[1]), reverse=True)[:top_n]
+            sorted_items = sorted(sorted_items, key=lambda x: float(x[1]))
+            labels = [k[-5:] for k, _ in sorted_items]
+            values = [float(v) for _, v in sorted_items]
+            fig, ax = plt.subplots(figsize=(6.5, max(2.0, 0.4 * len(labels) + 0.8)))
+            _style(fig, ax)
+            colors = [main_c if v == max(values) else light_c for v in values]
+            bars = ax.barh(labels, values, color=colors, edgecolor=main_c, linewidth=0.5, alpha=0.9)
+            for bar, val in zip(bars, values):
+                ax.text(val + max(values) * 0.01, bar.get_y() + bar.get_height() / 2,
+                        f"{val:.1f}", va="center", fontsize=7, color=THEME["text"])
+            ax.set_xlabel(f"{unit}", fontsize=7.5, color=THEME["muted"])
+            ax.set_title(f"Top {top_n} días de mayor consumo", fontsize=9.5, fontweight="bold", color=THEME["text"], pad=8)
+            plt.tight_layout(pad=0.8)
+            return _save(fig)
+        except: return None

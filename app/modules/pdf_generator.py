@@ -116,6 +116,19 @@ def _render_charts(kpi, options, brand_color=None):
             sensor_col=sensor_col,
         )
 
+    show_cumulative = options.get("show_cumulative", False)
+    show_top_days   = options.get("show_top_days", False)
+
+    if show_cumulative and ktype == "energy" and chart_data:
+        enriched["cumulative_img"] = Visualizer.create_cumulative_line(
+            data=chart_data, unit=unit, brand_color=brand_color,
+        )
+
+    if show_top_days and ktype == "energy" and chart_data:
+        enriched["top_days_img"] = Visualizer.create_top_days(
+            data=chart_data, unit=unit, brand_color=brand_color,
+        )
+
     if show_heatmap and ktype == "energy":
         heatmap_d = kpi.get("heatmap_data")
         if heatmap_d:
@@ -167,9 +180,13 @@ def _card_html(alias, kpi):
         {kpi_html}{charts}
     </div>"""
 
-    hm = kpi.get("heatmap_img")
+    hm  = kpi.get("heatmap_img")
+    cum = kpi.get("cumulative_img")
+    top = kpi.get("top_days_img")
     if hm:
         card += f'<div class="heatmap-wrap">{_img(hm)}</div>'
+    if cum: card += f'<div class="chart-wrap">{_img(cum)}</div>'
+    if top: card += f'<div class="chart-wrap">{_img(top)}</div>'
 
     return card
 
