@@ -332,3 +332,37 @@ python scripts/smoke_test_scheduler_api.py \
   --tenant <tenant> --client <client> --site <site> --device <device> \
   --email test@example.com
 ```
+
+---
+
+## Changelog reciente (Marzo 2026)
+
+### Nuevas funcionalidades en informes PDF (`report_options`)
+
+Las siguientes opciones están disponibles tanto en generación manual (portal `/informes`) como en tareas programadas (`/programador`):
+
+| Opción | Por defecto | Descripción |
+|--------|-------------|-------------|
+| `show_profile` | ✅ | Perfil horario promedio del período |
+| `show_summary` | ✅ | Tabla resumen con tendencias y comparativa |
+| `show_prev` | ❌ | Barras comparativas con mes anterior |
+| `show_heatmap` | ❌ | Heatmap semanal hora×día (lento en ARM64) |
+| `show_cumulative` | ❌ | Línea de consumo acumulado del mes |
+| `show_top_days` | ❌ | Ranking top 7 días de mayor consumo |
+
+### Fixes aplicados
+- Página en blanco al inicio del PDF — corregido con `section-intro` block
+- Leyenda del gráfico de barras solapada — movida encima del plot (`bbox_to_anchor`)
+- Tendencia en tabla resumen ahora muestra el mes de referencia (ej. "▼ -45.9% vs Enero 2026")
+- Conexiones (Tenants) fallaban por puerto incorrecto — corregido a 8000 en `.env`
+
+### Timeouts
+- Generación manual: `REPORT_TIMEOUT_SECONDS = 480`
+- Tareas programadas: `SCHEDULER_RUN_TIMEOUT_SECONDS = 600`
+
+### Notas de operación
+- El heatmap tarda ~3-4 min en ARM64. Mantener como opt-in.
+- **No usar `python3 - << EOF`** para editar archivos — vacía el archivo si falla a mitad.
+- **PuTTY**: el clic derecho pega en lugar de copiar. Seleccionar texto = copiar automáticamente.
+- El portal necesita rebuild (`build_standalone.sh`) solo cuando cambia código TypeScript/React.
+- Los cambios en Python (API, módulos) solo requieren `systemctl restart sennet-agent-api.service`.
