@@ -44,6 +44,8 @@ export type ReportPayload = {
     show_summary?: boolean;
     show_prev?: boolean;
     show_heatmap?: boolean;
+    show_cumulative?: boolean;
+    show_top_days?: boolean;
   };
 };
 

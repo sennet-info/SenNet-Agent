@@ -90,6 +90,8 @@ export default function InformesPage() {
   const [showSummary, setShowSummary] = useState(true);
   const [showPrev, setShowPrev] = useState(false);
   const [showHeatmap, setShowHeatmap] = useState(false);
+  const [showCumulative, setShowCumulative] = useState(false);
+  const [showTopDays, setShowTopDays] = useState(false);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingClients, setLoadingClients] = useState(false);
@@ -397,6 +399,8 @@ export default function InformesPage() {
           show_summary: showSummary,
           show_prev: showPrev,
           show_heatmap: showHeatmap,
+          show_cumulative: showCumulative,
+          show_top_days: showTopDays,
         },
         ...rangePayload,
       });
@@ -568,6 +572,14 @@ export default function InformesPage() {
             <label className="inline-flex items-center gap-2 text-sm">
               <input type="checkbox" checked={showHeatmap} onChange={(e) => setShowHeatmap(e.target.checked)} />
               Heatmap semanal
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={showCumulative} onChange={(e) => setShowCumulative(e.target.checked)} />
+              Consumo acumulado
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={showTopDays} onChange={(e) => setShowTopDays(e.target.checked)} />
+              Top dias consumo
             </label>
           </div>
         </div>
