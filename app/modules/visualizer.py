@@ -95,7 +95,7 @@ class Visualizer:
                 while len(pvals)<len(x_labs): pvals.append(0)
                 ax.bar(x+w/2, pvals, width=w, color=light_c, alpha=0.85,
                        edgecolor=main_c, linewidth=0.5, label="Mes anterior", zorder=3)
-                ax.legend(fontsize=7, framealpha=0.9, loc="upper left", bbox_to_anchor=(1.01, 1.0), borderaxespad=0)
+                ax.legend(fontsize=7, framealpha=0.95, loc="upper right", edgecolor="#DEE2E6")
             if len(x_labs)<=16:
                 for bar in bars:
                     h = bar.get_height()
@@ -109,7 +109,7 @@ class Visualizer:
             ax.set_ylabel(f"{pal['label']} ({unit})", fontsize=7.5, labelpad=4, color=THEME["muted"])
             if title_chart:
                 ax.set_title(title_chart, fontsize=9.5, fontweight="bold", color=THEME["text"], pad=8)
-            plt.tight_layout(pad=0.8, rect=[0, 0, 0.82, 1])
+            plt.tight_layout(pad=0.8)
             return _save(fig)
         except: return None
 

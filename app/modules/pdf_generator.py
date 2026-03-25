@@ -26,19 +26,19 @@ def _get_css(palette="rojo"):
 * {{ box-sizing: border-box; }}
 body {{ font-family: Helvetica, Arial, sans-serif; color: #1A1A2E; margin: 0; padding: 0; line-height: 1.5; font-size: 10pt; }}
 .report-header {{ display: flex; justify-content: space-between; align-items: flex-end;
-                  border-bottom: 2.5px solid {p['main']}; padding-bottom: 8px; margin-bottom: 24px;
-                  page-break-after: avoid; }}
+                  border-bottom: 2.5px solid {p['main']}; padding-bottom: 8px; margin-bottom: 16px; }}
 .logo {{ font-weight: bold; font-size: 22pt; letter-spacing: -0.5px; line-height: 1; }}
 .logo .sen {{ color: #000; }} .logo .net {{ color: #9E9E9E; }}
 .logo .bi  {{ font-size: 13pt; color: {p['main']}; margin-left: 3px; }}
 .header-meta {{ font-size: 8.5pt; color: #6C757D; text-align: right; line-height: 1.7; }}
 .section {{ padding-top: 0; }}
 .section + .section {{ page-break-before: always; padding-top: 4mm; }}
+.section-intro {{ break-inside: avoid; page-break-inside: avoid; margin-bottom: 16px; }}
 .section-title {{ font-size: 15pt; font-weight: 700; color: #1A1A2E;
                   padding-left: 10px; border-left: 4px solid {p['main']};
-                  margin: 0 0 16px 0; page-break-after: avoid; }}
+                  margin: 0; }}
 .card {{ background: #fff; border: 1px solid #DEE2E6; border-radius: 8px;
-         padding: 16px 18px 14px; margin-bottom: 20px; break-inside: avoid;
+         padding: 16px 18px 14px; margin-bottom: 12px; break-inside: avoid;
          box-shadow: 0 1px 4px rgba(0,0,0,0.07); }}
 .card-header {{ font-size: 11pt; font-weight: 700; color: #1A1A2E;
                 padding-bottom: 8px; border-bottom: 1px solid #DEE2E6; margin-bottom: 14px; }}
@@ -55,6 +55,7 @@ body {{ font-family: Helvetica, Arial, sans-serif; color: #1A1A2E; margin: 0; pa
 .kpi-val.sensor {{ color: #1565C0; }}
 .kpi-lbl {{ font-size: 7.5pt; color: #6C757D; text-transform: uppercase; letter-spacing: 0.4px; margin-top: 5px; }}
 .chart-wrap {{ text-align: center; margin-top: 14px; }}
+.heatmap-wrap {{ text-align: center; margin-top: 8px; margin-bottom: 20px; }}
 img.chart {{ max-width: 100%; border-radius: 5px; border: 1px solid #DEE2E6; }}
 .prev-warning {{ background: #FFF3E0; border-left: 3px solid #FF9800; border-radius: 4px;
                  padding: 6px 10px; color: #E65100; font-size: 8pt; margin-top: 10px; }}
@@ -151,7 +152,6 @@ def _card_html(alias, kpi):
     c1 = kpi.get("chart_img_1")
     c2 = kpi.get("chart_img_2")
     g  = kpi.get("gauge_img")
-    hm = kpi.get("heatmap_img")
     prev_warn = kpi.get("prev_no_data_warning","")
 
     charts = ""
@@ -160,13 +160,18 @@ def _card_html(alias, kpi):
         charts += f'<div class="prev-warning">&#9888; {prev_warn}</div>'
     if c2: charts += f'<div class="chart-wrap">{_img(c2)}</div>'
     if g and not c2: charts += f'<div class="chart-wrap">{_img(g)}</div>'
-    if hm: charts += f'<div class="chart-wrap">{_img(hm)}</div>'
 
-    return f"""
+    card = f"""
     <div class="card">
         <div class="card-header">{alias}<span class="type-tag {tag_cls}">{tag_lbl}</span></div>
         {kpi_html}{charts}
     </div>"""
+
+    hm = kpi.get("heatmap_img")
+    if hm:
+        card += f'<div class="heatmap-wrap">{_img(hm)}</div>'
+
+    return card
 
 class PDFComposer:
 
@@ -205,8 +210,10 @@ class PDFComposer:
             first = False
             sections_html += (
                 f'<div class="section">'
+                f'<div class="section-intro">'
                 f'{header_block}'
                 f'<div class="section-title">{section_title}</div>'
+                f'</div>'
                 f'{inner}'
                 f'</div>\n'
             )
