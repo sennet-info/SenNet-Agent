@@ -67,6 +67,15 @@ export type SchedulerTaskPayload = {
   emails: string[];
   enabled?: boolean;
   name?: string;
+  report_options?: {
+    palette?: string;
+    show_profile?: boolean;
+    show_summary?: boolean;
+    show_prev?: boolean;
+    show_heatmap?: boolean;
+    show_cumulative?: boolean;
+    show_top_days?: boolean;
+  };
 };
 
 export type SchedulerTask = SchedulerTaskPayload & {
