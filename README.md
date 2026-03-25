@@ -366,3 +366,119 @@ Las siguientes opciones están disponibles tanto en generación manual (portal `
 - **PuTTY**: el clic derecho pega en lugar de copiar. Seleccionar texto = copiar automáticamente.
 - El portal necesita rebuild (`build_standalone.sh`) solo cuando cambia código TypeScript/React.
 - Los cambios en Python (API, módulos) solo requieren `systemctl restart sennet-agent-api.service`.
+
+---
+
+## Deploy en VPS (producción recomendada)
+
+El sistema está diseñado para correr en BeaglePlay ARM64 como entorno de desarrollo/pruebas, pero el destino final es una VPS con más recursos. En VPS:
+
+- La generación de PDFs con heatmap pasa de ~3-4 min a ~15-30 segundos
+- Los timeouts pueden reducirse: `REPORT_TIMEOUT_SECONDS = 120`, `SCHEDULER_RUN_TIMEOUT_SECONDS = 180`
+- Se puede aumentar `max_workers` en las tareas para procesar más dispositivos en paralelo
+
+### Requisitos recomendados para VPS
+- Ubuntu 22.04 / Debian 12 LTS, x86_64
+- 2 vCPU mínimo (4 recomendado)
+- 4 GB RAM mínimo (8 recomendado)
+- 20 GB disco SSD
+- Python 3.10+, Node.js 20 LTS
+- Puerto 3000 (portal) y 8000 (API) accesibles o detrás de nginx
+
+### Diferencias respecto a BeaglePlay
+
+| Aspecto | BeaglePlay ARM64 | VPS x86_64 |
+|---------|-----------------|------------|
+| Generación PDF sin heatmap | ~30-60s | ~5-10s |
+| Generación PDF con heatmap | ~3-4 min | ~15-30s |
+| `REPORT_TIMEOUT_SECONDS` | 480 | 120 |
+| `SCHEDULER_RUN_TIMEOUT_SECONDS` | 600 | 180 |
+| `max_workers` recomendado | 2-4 | 4-8 |
+| Heatmap como opt-in | Sí (lento) | Opcional (rápido) |
+
+### Pasos de instalación en VPS (desde cero)
+```bash
+# 1. Dependencias del sistema
+apt update && apt install -y python3 python3-venv python3-pip nodejs npm git \
+  libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf2.0-0 \
+  libffi-dev shared-mime-info
+
+# 2. Clonar repo
+git clone https://github.com/sennet-info/SenNet-Agent.git /opt/sennet-agent/repo
+cd /opt/sennet-agent/repo
+
+# 3. Virtualenv Python
+python3 -m venv /opt/sennet-agent/venv
+/opt/sennet-agent/venv/bin/pip install --upgrade pip
+/opt/sennet-agent/venv/bin/pip install -r requirements.txt
+
+# 4. Configurar token admin
+mkdir -p /etc/systemd/system/sennet-agent-api.service.d/
+cat > /etc/systemd/system/sennet-agent-api.service.d/override.conf << EOF
+[Service]
+Environment="AGENT_ADMIN_TOKEN=cambia-este-token"
+EOF
+
+# 5. Instalar servicios
+cp systemd/sennet-agent-api.service /etc/systemd/system/
+cp systemd/sennet-scheduler-worker.service /etc/systemd/system/
+cp systemd/sennet-scheduler-worker.timer /etc/systemd/system/
+cp systemd/sennet-portal.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now sennet-agent-api.service
+systemctl enable --now sennet-scheduler-worker.timer
+
+# 6. Construir portal
+cd /opt/sennet-agent/repo/portal
+npm ci
+mkdir -p /opt/sennet-portal/portal
+rsync -a --delete --exclude node_modules --exclude .next \
+  /opt/sennet-agent/repo/portal/ /opt/sennet-portal/portal/
+cat > /opt/sennet-portal/portal/.env << EOF
+AGENT_BASE_URL=http://127.0.0.1:8000
+EOF
+cd /opt/sennet-portal/portal
+./scripts/build_standalone.sh
+systemctl enable --now sennet-portal.service
+
+# 7. Verificar
+curl -s http://127.0.0.1:8000/v1/health
+systemctl is-active sennet-agent-api sennet-scheduler-worker.timer sennet-portal
+```
+
+### Nginx como proxy inverso (recomendado en VPS)
+```nginx
+server {
+    listen 80;
+    server_name tu-dominio.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /api/agent/ {
+        proxy_pass http://127.0.0.1:8000/;
+        proxy_set_header Host $host;
+        proxy_read_timeout 600s;
+    }
+}
+```
+
+Con nginx, el portal usa `AGENT_BASE_URL=http://127.0.0.1:8000` internamente y el cliente accede a `/api/agent/` externamente.
+
+### Ajustar timeouts para VPS en `agent_api/main.py`
+```python
+REPORT_TIMEOUT_SECONDS = 120
+SCHEDULER_RUN_TIMEOUT_SECONDS = 180
+```
+
+### Variables de entorno importantes en VPS
+```bash
+# /etc/systemd/system/sennet-agent-api.service.d/override.conf
+AGENT_ADMIN_TOKEN=token-seguro-aqui
+
+# /opt/sennet-portal/portal/.env
+AGENT_BASE_URL=http://127.0.0.1:8000
+```
