@@ -43,6 +43,7 @@ export type ReportPayload = {
     show_profile?: boolean;
     show_summary?: boolean;
     show_prev?: boolean;
+    show_heatmap?: boolean;
   };
 };
 

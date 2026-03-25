@@ -125,6 +125,7 @@ class Analyzer:
                             "prev_chart_data":prev_chart,"type":"energy","suffix_name":f"({c})",
                             "energy_column_selected":c,"energy_selection_rule":rres.get("selected_by_rule"),
                             "energy_warning":rres.get("warning"),
+                            "heatmap_data":Analyzer._heatmap_data(df_r, c) if not df_r.empty else {},
                         })
 
             elif eres.get("selected_energy_column"):
@@ -158,6 +159,7 @@ class Analyzer:
                     "price_input":float(price_kwh),"cost_computed":float(cost),
                     "energy_selection_rule":eres.get("selected_by_rule"),
                     "energy_warning":eres.get("warning"),
+                    "heatmap_data":Analyzer._heatmap_data(df_r, rc) if (not df_r.empty and rc) else {},
                 })
         except: pass
 
@@ -203,6 +205,36 @@ class Analyzer:
         return kpis
 
     @staticmethod
+    def _heatmap_data(df_raw, column):
+        """
+        Agrega df_raw en {hora(0-23): {dow(0-6): valor_medio}}.
+        Ligero, serializable, sin DataFrame en memoria tras el cálculo.
+        """
+        try:
+            if df_raw is None or df_raw.empty: return {}
+            if column not in df_raw.columns: return {}
+            import pandas as _pd
+            df = df_raw[[column]].copy()
+            if not isinstance(df.index, _pd.DatetimeIndex):
+                return {}
+            # Vectorizado: sin lambda para máximo rendimiento en ARM64
+            df["date"] = df.index.date
+            df["hour"] = df.index.hour
+            df["dow"]  = df.index.dayofweek
+            grp = df.groupby(["date","hour","dow"])[column]
+            hourly = (grp.max() - grp.min()).clip(lower=0)
+            hourly = hourly[hourly > 0]
+            if hourly.empty:
+                return {}
+            grouped = hourly.groupby(["hour","dow"]).mean()
+            result = {}
+            for (h, d), v in grouped.items():
+                result.setdefault(int(h), {})[int(d)] = round(float(v), 4)
+            return result
+        except:
+            return {}
+
+    @staticmethod
     def build_summary_rows(all_kpis):
         """
         Genera filas para la tabla resumen.
@@ -236,7 +268,20 @@ class Analyzer:
                         pct = (ca - pa) / pa * 100
                         trend_pct = pct
                         trend = "+" if ca > pa*1.05 else ("-" if ca < pa*0.95 else "=")
-                        trend_note = "vs período anterior"
+                        # Calcular nombre del mes anterior para que el cliente entienda la comparación
+                        try:
+                            first_key = sorted(curr.keys())[0]
+                            from datetime import datetime as _dt
+                            curr_dt = _dt.strptime(first_key[:7], "%Y-%m")
+                            import calendar
+                            prev_month = curr_dt.month - 1 or 12
+                            prev_year  = curr_dt.year if curr_dt.month > 1 else curr_dt.year - 1
+                            prev_name  = calendar.month_name[prev_month]
+                            meses_es   = {1:"Enero",2:"Febrero",3:"Marzo",4:"Abril",5:"Mayo",6:"Junio",
+                                          7:"Julio",8:"Agosto",9:"Septiembre",10:"Octubre",11:"Noviembre",12:"Diciembre"}
+                            trend_note = f"vs {meses_es[prev_month]} {prev_year}"
+                        except Exception:
+                            trend_note = "vs mes anterior"
 
                 # Opción 2: comparar períodos consecutivos del mismo informe
                 elif len(peers) > 1:
