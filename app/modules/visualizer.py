@@ -95,7 +95,7 @@ class Visualizer:
                 while len(pvals)<len(x_labs): pvals.append(0)
                 ax.bar(x+w/2, pvals, width=w, color=light_c, alpha=0.85,
                        edgecolor=main_c, linewidth=0.5, label="Mes anterior", zorder=3)
-                ax.legend(fontsize=7, framealpha=0.95, loc="upper right", edgecolor="#DEE2E6")
+                ax.legend(fontsize=7, framealpha=0.95, loc="upper center", bbox_to_anchor=(0.5, 1.13), ncol=2, edgecolor="#DEE2E6")
             if len(x_labs)<=16:
                 for bar in bars:
                     h = bar.get_height()
@@ -266,7 +266,8 @@ class Visualizer:
                 trend = r.get("trend","=")
                 pct   = r.get("trend_pct","—")
                 sym   = {"+":" ▲","-":" ▼","=":"  ●"}.get(trend,"●")
-                tcell = f"{sym} {pct}" if pct!="—" else sym
+                note  = r.get("trend_note","")
+                tcell = f"{sym} {pct} ({note})" if (pct!="—" and note) else (f"{sym} {pct}" if pct!="—" else sym)
 
                 device = r.get("device","")
                 if len(device)>32: device = device[:30]+"…"
