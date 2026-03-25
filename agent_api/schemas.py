@@ -72,6 +72,7 @@ class SchedulerTaskBase(BaseModel):
     end_dt: Optional[datetime] = None
     emails: List[str] = Field(min_length=1)
     enabled: bool = True
+    report_options: Optional[dict] = None
 
 
 class SchedulerTaskCreateRequest(SchedulerTaskBase):

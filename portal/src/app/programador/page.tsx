@@ -86,6 +86,12 @@ export default function ProgramadorPage() {
   const [error, setError] = useState("");
   const [okMsg, setOkMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [taskShowProfile, setTaskShowProfile] = useState(true);
+  const [taskShowSummary, setTaskShowSummary] = useState(true);
+  const [taskShowPrev, setTaskShowPrev] = useState(false);
+  const [taskShowHeatmap, setTaskShowHeatmap] = useState(false);
+  const [taskShowCumulative, setTaskShowCumulative] = useState(false);
+  const [taskShowTopDays, setTaskShowTopDays] = useState(false);
 
   const [tenantOptions, setTenantOptions] = useState<string[]>([]);
   const [clients, setClients] = useState<string[]>([]);
@@ -306,6 +312,15 @@ export default function ProgramadorPage() {
         end_dt: form.endDt || undefined,
         emails: validEmails,
         enabled: true,
+        report_options: {
+          palette: "rojo",
+          show_profile: taskShowProfile,
+          show_summary: taskShowSummary,
+          show_prev: taskShowPrev,
+          show_heatmap: taskShowHeatmap,
+          show_cumulative: taskShowCumulative,
+          show_top_days: taskShowTopDays,
+        },
       });
       setOkMsg("La tarea se ha guardado correctamente");
       await initialLoad(token);
@@ -683,6 +698,17 @@ export default function ProgramadorPage() {
             </ul>
           </div>
 
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-slate-300">Opciones del informe</p>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={taskShowProfile} onChange={(e) => setTaskShowProfile(e.target.checked)} /> Perfil horario</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={taskShowSummary} onChange={(e) => setTaskShowSummary(e.target.checked)} /> Tabla resumen</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={taskShowPrev} onChange={(e) => setTaskShowPrev(e.target.checked)} /> Comparar mes anterior</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={taskShowHeatmap} onChange={(e) => setTaskShowHeatmap(e.target.checked)} /> Heatmap semanal</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={taskShowCumulative} onChange={(e) => setTaskShowCumulative(e.target.checked)} /> Consumo acumulado</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={taskShowTopDays} onChange={(e) => setTaskShowTopDays(e.target.checked)} /> Top dias consumo</label>
+            </div>
+          </div>
           <button disabled={busy || !canSubmit} className="rounded bg-emerald-600 px-4 py-2 text-sm disabled:opacity-50" type="submit">
             Guardar tarea
           </button>
