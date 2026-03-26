@@ -604,15 +604,15 @@ export default function InformesPage() {
           className="w-full rounded bg-slate-800/50 px-3 py-1 text-sm"
           placeholder="Buscar dispositivo…"
         />
-        <fieldset className="grid gap-2 md:grid-cols-3">
+        <fieldset className="space-y-3">
           <legend className="sr-only">Seleccionar dispositivos</legend>
           {filteredDevices.length === 0 ? (
             <p className="text-sm text-slate-400">No se encontraron dispositivos</p>
           ) : (
             Object.entries(groupedDevices).map(([group, groupItems]) => (
-              <div key={group} className="space-y-2 md:col-span-3">
+              <div key={group} className="space-y-2">
                 <p className="text-sm font-semibold text-slate-300">{groupLabels[group] ?? group}</p>
-                <div className="grid gap-2 md:grid-cols-3">
+                <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
                   {groupItems.map((device) => {
                     const isSelected = selected.includes(device.id);
                     return (
@@ -624,7 +624,7 @@ export default function InformesPage() {
                             isSelected ? prev.filter((item) => item !== device.id) : [...prev, device.id],
                           )
                         }
-                        className={`flex min-h-11 items-center justify-between rounded border p-3 text-left ${
+                        className={`flex h-11 items-center justify-between rounded border bg-slate-900/40 p-2 text-left ${
                           isSelected ? "border-emerald-600 bg-emerald-800/30" : "border-slate-700 bg-slate-900/40"
                         }`}
                       >
