@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
 
 import DebugPanel from "@/components/DebugPanel";
 import {
@@ -418,55 +419,63 @@ export default function InformesPage() {
   return (
     <section className="space-y-5">
       <h2 className="text-3xl font-semibold tracking-tight">Informes</h2>
+      <p className="text-sm italic text-slate-400">
+        Selecciona ámbito, dispositivos y rango de fechas para generar un informe.
+      </p>
 
-      <div className="grid gap-2 md:grid-cols-4">
-        {tenantOptions.length > 0 ? (
-          <select value={tenant} onChange={(event) => setTenant(event.target.value)} className="rounded border border-slate-700 bg-slate-950 p-2">
-            {tenantOptions.map((item) => (
+      <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
+        <h3 className="text-base font-semibold text-slate-200">Ámbito</h3>
+        <div className="grid gap-2 md:grid-cols-4">
+          {tenantOptions.length > 0 ? (
+            <select value={tenant} onChange={(event) => setTenant(event.target.value)} className="rounded border border-slate-700 bg-slate-950 p-2">
+              {tenantOptions.map((item) => (
+                <option key={item}>{item}</option>
+              ))}
+            </select>
+          ) : (
+            <input value={tenant} onChange={(event) => setTenant(event.target.value)} className="rounded border border-slate-700 bg-slate-950 p-2" placeholder="Tenant" />
+          )}
+
+          <select
+            value={client}
+            onChange={(event) => setClient(event.target.value)}
+            disabled={!tenant || loadingClients}
+            className="rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60"
+          >
+            {loadingClients && <option>Cargando...</option>}
+            {!loadingClients && clients.length === 0 && <option value="">Sin clientes</option>}
+            {!loadingClients &&
+              clients.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+          </select>
+
+          <select value={site} onChange={(event) => setSite(event.target.value)} disabled={!client || loadingSites} className="rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60">
+            {loadingSites && <option>Cargando...</option>}
+            {!loadingSites && sites.map((item) => (
               <option key={item}>{item}</option>
             ))}
           </select>
-        ) : (
-          <input value={tenant} onChange={(event) => setTenant(event.target.value)} className="rounded border border-slate-700 bg-slate-950 p-2" placeholder="Tenant" />
-        )}
-
-        <select
-          value={client}
-          onChange={(event) => setClient(event.target.value)}
-          disabled={!tenant || loadingClients}
-          className="rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60"
-        >
-          {loadingClients && <option>Cargando...</option>}
-          {!loadingClients && clients.length === 0 && <option value="">Sin clientes</option>}
-          {!loadingClients &&
-            clients.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
+          <select value={serial} onChange={(event) => setSerial(event.target.value)} disabled={!site || loadingDevices} className="rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60">
+            <option value="">Todos los seriales</option>
+            {serials.map((item) => (
+              <option key={item}>{item}</option>
             ))}
-        </select>
-
-        <select value={site} onChange={(event) => setSite(event.target.value)} disabled={!client || loadingSites} className="rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60">
-          {loadingSites && <option>Cargando...</option>}
-          {!loadingSites && sites.map((item) => (
-            <option key={item}>{item}</option>
-          ))}
-        </select>
-        <select value={serial} onChange={(event) => setSerial(event.target.value)} disabled={!site || loadingDevices} className="rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60">
-          <option value="">Todos los seriales</option>
-          {serials.map((item) => (
-            <option key={item}>{item}</option>
-          ))}
-        </select>
+          </select>
+        </div>
       </div>
 
-      <div className="rounded border border-slate-800 p-3">
-        <div className="mb-2 flex gap-2">
+      <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
+        <h3 className="text-base font-semibold text-slate-200">Dispositivos</h3>
+        <div className="flex gap-2">
           <button className="rounded bg-slate-700 px-2 py-1" onClick={() => setSelected(devices)} type="button">Todos</button>
           <button className="rounded bg-slate-700 px-2 py-1" onClick={() => setSelected([])} type="button">Nada</button>
           <button className="rounded bg-slate-700 px-2 py-1" onClick={() => setSelected(devices.filter((d) => d.toUpperCase().includes("GENERAL")))} type="button">General</button>
         </div>
-        <div className="grid gap-2 md:grid-cols-3">
+        <fieldset className="grid gap-2 md:grid-cols-3">
+          <legend className="sr-only">Seleccionar dispositivos</legend>
           {devices.map((device) => (
             <label key={device} className="flex items-center gap-2 text-sm">
               <input
@@ -481,25 +490,28 @@ export default function InformesPage() {
               {device}
             </label>
           ))}
-        </div>
+        </fieldset>
       </div>
 
-      <div className="grid gap-2 md:grid-cols-4">
-        <select value={rangeMode} onChange={(event) => setRangeMode(event.target.value as ReportRangeMode)} className="rounded border border-slate-700 bg-slate-950 p-2">
-          <option value="last_n_days">Últimos N días</option>
-          <option value="month_to_date">Mes en curso</option>
-          <option value="previous_full_month">Último mes cerrado</option>
-          <option value="custom">Personalizado</option>
-        </select>
-        <input type="number" min={1} value={lastDays} onChange={(event) => setLastDays(Number(event.target.value))} disabled={rangeMode !== "last_n_days"} className="rounded border border-slate-700 bg-slate-950 p-2" />
-        <input type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} disabled={rangeMode !== "custom"} className="rounded border border-slate-700 bg-slate-950 p-2" />
-        <input type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} disabled={rangeMode !== "custom"} className="rounded border border-slate-700 bg-slate-950 p-2" />
+      <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
+        <h3 className="text-base font-semibold text-slate-200">Rango de fechas</h3>
+        <div className="grid gap-2 md:grid-cols-4">
+          <select value={rangeMode} onChange={(event) => setRangeMode(event.target.value as ReportRangeMode)} className="rounded border border-slate-700 bg-slate-950 p-2">
+            <option value="last_n_days">Últimos N días</option>
+            <option value="month_to_date">Mes en curso</option>
+            <option value="previous_full_month">Último mes cerrado</option>
+            <option value="custom">Personalizado</option>
+          </select>
+          <input type="number" min={1} value={lastDays} onChange={(event) => setLastDays(Number(event.target.value))} disabled={rangeMode !== "last_n_days"} className="rounded border border-slate-700 bg-slate-950 p-2" />
+          <input type="date" value={customStart} onChange={(event) => setCustomStart(event.target.value)} disabled={rangeMode !== "custom"} className="rounded border border-slate-700 bg-slate-950 p-2" />
+          <input type="date" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} disabled={rangeMode !== "custom"} className="rounded border border-slate-700 bg-slate-950 p-2" />
+        </div>
+        <p className="text-xs text-slate-400">{rangeMode === "last_n_days" ? "Se usará desde ahora menos N días hasta ahora." : rangeMode === "month_to_date" ? "Mes en curso: desde el día 1 a las 00:00 hasta este momento." : rangeMode === "previous_full_month" ? "Mes anterior completo: desde el día 1 00:00 hasta el último día 23:59:59." : "Se usará exactamente desde las 00:00 del inicio hasta las 23:59:59 del fin."}</p>
       </div>
-      <p className="text-xs text-slate-400">{rangeMode === "last_n_days" ? "Se usará desde ahora menos N días hasta ahora." : rangeMode === "month_to_date" ? "Mes en curso: desde el día 1 a las 00:00 hasta este momento." : rangeMode === "previous_full_month" ? "Mes anterior completo: desde el día 1 00:00 hasta el último día 23:59:59." : "Se usará exactamente desde las 00:00 del inicio hasta las 23:59:59 del fin."}</p>
 
       {shouldShowPricing && (
-        <div className="rounded border border-slate-800 p-4 space-y-2">
-          <p className="text-sm font-semibold">Tarifa energética</p>
+        <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
+          <h3 className="text-base font-semibold text-slate-200">Tarifa energética</h3>
           <p className="text-sm text-slate-200">Precio aplicado al informe: <span className="font-semibold">{formatPrice(priceOverride ? manualPrice : resolvedPrice)}</span></p>
           <p className="text-xs text-slate-400">{priceLoading
             ? "Resolviendo tarifa por defecto..."
@@ -519,15 +531,18 @@ export default function InformesPage() {
         </div>
       )}
 
-      <div className="rounded border border-slate-800 p-3">
-        <button
-          className="text-sm text-slate-300 underline-offset-2 hover:text-white hover:underline"
-          onClick={() => setShowAdvancedOptions((prev) => !prev)}
-          type="button"
-        >
-          {showAdvancedOptions ? "Ocultar opciones avanzadas" : "Mostrar opciones avanzadas"}
-        </button>
-
+      <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold text-slate-200">Opciones avanzadas</h3>
+          <button
+            className="inline-flex items-center gap-2 text-sm text-slate-300 underline-offset-2 hover:text-white hover:underline"
+            onClick={() => setShowAdvancedOptions((prev) => !prev)}
+            type="button"
+          >
+            {showAdvancedOptions ? "Ocultar" : "Mostrar"}
+            <ChevronDown className={`h-4 w-4 transition-transform ${showAdvancedOptions ? "rotate-180" : "rotate-0"}`} />
+          </button>
+        </div>
         {showAdvancedOptions && (
           <div className="mt-3 grid gap-3">
             <label className="inline-flex items-center gap-2 text-sm">
@@ -539,9 +554,9 @@ export default function InformesPage() {
         )}
       </div>
 
-      <div className="rounded border border-slate-800 p-3 space-y-3">
-        <p className="text-sm font-medium text-slate-300">Opciones del informe</p>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
+        <h3 className="text-base font-semibold text-slate-200">Configuración del informe</h3>
+        <div className="grid gap-2 md:grid-cols-4">
           <div>
             <label className="text-xs text-slate-400 block mb-1">Color del informe</label>
             <select
@@ -556,7 +571,7 @@ export default function InformesPage() {
               <option value="oscuro">Oscuro</option>
             </select>
           </div>
-          <div className="flex flex-col gap-2 justify-end">
+          <div className="flex flex-col gap-2 md:col-span-3">
             <label className="inline-flex items-center gap-2 text-sm">
               <input type="checkbox" checked={showProfile} onChange={(e) => setShowProfile(e.target.checked)} />
               Perfil horario
