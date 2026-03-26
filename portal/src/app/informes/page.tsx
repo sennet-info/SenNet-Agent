@@ -542,7 +542,7 @@ export default function InformesPage() {
             <label htmlFor="site" className="text-xs text-slate-400">Instalación</label>
             <select
               id="site"
-              className="w-full rounded border border-slate-700 bg-slate-900/50 px-2 py-1 text-sm text-slate-200"
+              className="w-full rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60"
               value={selectedSite}
               onChange={(event) => setSelectedSite(event.target.value)}
               disabled={!client || loadingSites}
