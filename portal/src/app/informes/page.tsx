@@ -290,6 +290,10 @@ export default function InformesPage() {
   }, [site]);
 
   useEffect(() => {
+    setSiteQuery(selectedSite);
+  }, [selectedSite]);
+
+  useEffect(() => {
     if (!selectedSite) return;
     setSite(selectedSite);
   }, [selectedSite]);
@@ -551,7 +555,7 @@ export default function InformesPage() {
                 role="combobox"
                 aria-controls="site-options-list"
                 aria-expanded={isSiteOptionsOpen}
-                value={siteQuery || selectedSite}
+                value={siteQuery}
                 onChange={(event) => {
                   setSiteQuery(event.target.value);
                   setIsSiteDropdownOpen(true);
@@ -559,8 +563,8 @@ export default function InformesPage() {
                 onFocus={() => setIsSiteDropdownOpen(true)}
                 onBlur={() => setTimeout(() => setIsSiteDropdownOpen(false), 100)}
                 disabled={!client || loadingSites}
-                placeholder={loadingSites ? "Cargando..." : "Buscar instalación"}
-                className="w-full rounded bg-slate-900/50 px-3 py-2 pr-10 disabled:opacity-60"
+                placeholder={loadingSites ? "Cargando..." : "Selecciona o busca instalación…"}
+                className="w-full rounded border border-slate-700 bg-slate-900/50 px-3 py-2 pr-10 text-sm text-slate-200 disabled:opacity-60"
               />
               <button
                 type="button"
@@ -580,7 +584,7 @@ export default function InformesPage() {
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => {
                         setSelectedSite(siteItem);
-                        setSiteQuery("");
+                        setSiteQuery(siteItem);
                         setIsSiteDropdownOpen(false);
                       }}
                       className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700"
