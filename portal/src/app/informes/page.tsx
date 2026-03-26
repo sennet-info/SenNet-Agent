@@ -104,6 +104,7 @@ export default function InformesPage() {
   const [serial, setSerial] = useState("");
   const [devices, setDevices] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
+  const [deviceSearch, setDeviceSearch] = useState("");
   const [rangeMode, setRangeMode] = useState<ReportRangeMode>("last_n_days");
   const [lastDays, setLastDays] = useState(7);
   const [customStart, setCustomStart] = useState("");
@@ -143,6 +144,7 @@ export default function InformesPage() {
     showCumulative,
     showTopDays,
   };
+  const filteredDevices = devices.filter((d) => d.toLowerCase().includes(deviceSearch.toLowerCase()));
 
   useEffect(() => {
     const savedRaw = window.localStorage.getItem(STORAGE_KEY);
@@ -465,70 +467,96 @@ export default function InformesPage() {
       <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
         <h3 className="text-base font-semibold text-slate-200">Ámbito</h3>
         <div className="grid gap-2 md:grid-cols-4">
-          {tenantOptions.length > 0 ? (
-            <select value={tenant} onChange={(event) => setTenant(event.target.value)} className="rounded border border-slate-700 bg-slate-950 p-2">
-              {tenantOptions.map((item) => (
+          <div className="space-y-1">
+            <label htmlFor="tenant-select" className="text-xs text-slate-400">Red / Tenant</label>
+            {tenantOptions.length > 0 ? (
+              <select id="tenant-select" value={tenant} onChange={(event) => setTenant(event.target.value)} className="w-full rounded border border-slate-700 bg-slate-950 p-2">
+                {tenantOptions.map((item) => (
+                  <option key={item}>{item}</option>
+                ))}
+              </select>
+            ) : (
+              <input id="tenant-select" value={tenant} onChange={(event) => setTenant(event.target.value)} className="w-full rounded border border-slate-700 bg-slate-950 p-2" placeholder="Tenant" />
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <label htmlFor="client-select" className="text-xs text-slate-400">Cliente</label>
+            <select
+              id="client-select"
+              value={client}
+              onChange={(event) => setClient(event.target.value)}
+              disabled={!tenant || loadingClients}
+              className="w-full rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60"
+            >
+              {loadingClients && <option>Cargando...</option>}
+              {!loadingClients && clients.length === 0 && <option value="">Sin clientes</option>}
+              {!loadingClients &&
+                clients.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label htmlFor="site-select" className="text-xs text-slate-400">Instalación</label>
+            <select id="site-select" value={site} onChange={(event) => setSite(event.target.value)} disabled={!client || loadingSites} className="w-full rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60">
+              {loadingSites && <option>Cargando...</option>}
+              {!loadingSites && sites.map((item) => (
                 <option key={item}>{item}</option>
               ))}
             </select>
-          ) : (
-            <input value={tenant} onChange={(event) => setTenant(event.target.value)} className="rounded border border-slate-700 bg-slate-950 p-2" placeholder="Tenant" />
-          )}
+          </div>
 
-          <select
-            value={client}
-            onChange={(event) => setClient(event.target.value)}
-            disabled={!tenant || loadingClients}
-            className="rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60"
-          >
-            {loadingClients && <option>Cargando...</option>}
-            {!loadingClients && clients.length === 0 && <option value="">Sin clientes</option>}
-            {!loadingClients &&
-              clients.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
+          <div className="space-y-1">
+            <label htmlFor="serial-select" className="text-xs text-slate-400">Equipo (serial)</label>
+            <select id="serial-select" value={serial} onChange={(event) => setSerial(event.target.value)} disabled={!site || loadingDevices} className="w-full rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60">
+              <option value="">Todos los seriales</option>
+              {serials.map((item) => (
+                <option key={item}>{item}</option>
               ))}
-          </select>
-
-          <select value={site} onChange={(event) => setSite(event.target.value)} disabled={!client || loadingSites} className="rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60">
-            {loadingSites && <option>Cargando...</option>}
-            {!loadingSites && sites.map((item) => (
-              <option key={item}>{item}</option>
-            ))}
-          </select>
-          <select value={serial} onChange={(event) => setSerial(event.target.value)} disabled={!site || loadingDevices} className="rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60">
-            <option value="">Todos los seriales</option>
-            {serials.map((item) => (
-              <option key={item}>{item}</option>
-            ))}
-          </select>
+            </select>
+          </div>
         </div>
       </div>
 
       <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
         <h3 className="text-base font-semibold text-slate-200">Dispositivos</h3>
+        <p className="text-xs text-slate-400">Puedes escribir para buscar un dispositivo</p>
         <div className="flex gap-2">
           <button className="rounded bg-slate-700 px-2 py-1" onClick={() => setSelected(devices)} type="button">Todos</button>
           <button className="rounded bg-slate-700 px-2 py-1" onClick={() => setSelected([])} type="button">Nada</button>
           <button className="rounded bg-slate-700 px-2 py-1" onClick={() => setSelected(devices.filter((d) => d.toUpperCase().includes("GENERAL")))} type="button">General</button>
         </div>
+        <input
+          type="text"
+          value={deviceSearch}
+          onChange={(e) => setDeviceSearch(e.target.value)}
+          className="w-full rounded bg-slate-800/50 px-3 py-1 text-sm"
+          placeholder="Buscar dispositivo…"
+        />
         <fieldset className="grid gap-2 md:grid-cols-3">
           <legend className="sr-only">Seleccionar dispositivos</legend>
-          {devices.map((device) => (
-            <label key={device} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={selected.includes(device)}
-                onChange={(event) =>
-                  setSelected((prev) =>
-                    event.target.checked ? [...prev, device] : prev.filter((item) => item !== device),
-                  )
-                }
-              />
-              {device}
-            </label>
-          ))}
+          {filteredDevices.length === 0 ? (
+            <p className="text-sm text-slate-400">No se encontraron dispositivos</p>
+          ) : (
+            filteredDevices.map((device) => (
+              <label key={device} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(device)}
+                  onChange={(event) =>
+                    setSelected((prev) =>
+                      event.target.checked ? [...prev, device] : prev.filter((item) => item !== device),
+                    )
+                  }
+                />
+                {device}
+              </label>
+            ))
+          )}
         </fieldset>
       </div>
 
