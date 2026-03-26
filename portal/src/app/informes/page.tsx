@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import type { ComponentType } from "react";
+import { BarChart2, ChevronDown, Flame, PieChart, Star, Table, TrendingUp } from "lucide-react";
 
 import DebugPanel from "@/components/DebugPanel";
 import {
@@ -32,6 +33,36 @@ const PRICE_SOURCE_LABELS: Record<PriceSource, string> = {
   fallback: "fallback global",
   manual_override: "tarifa manual para este informe",
 };
+
+const PALETTE_OPTIONS = [
+  { value: "rojo", label: "Rojo", colorClass: "bg-red-600" },
+  { value: "azul", label: "Azul", colorClass: "bg-blue-600" },
+  { value: "verde", label: "Verde", colorClass: "bg-green-600" },
+  { value: "morado", label: "Morado", colorClass: "bg-purple-600" },
+  { value: "oscuro", label: "Oscuro", colorClass: "bg-slate-700" },
+] as const;
+
+type ReportComponentKey =
+  | "showProfile"
+  | "showSummary"
+  | "showPrev"
+  | "showHeatmap"
+  | "showCumulative"
+  | "showTopDays";
+
+const REPORT_COMPONENTS: Array<{
+  key: ReportComponentKey;
+  label: string;
+  description: string;
+  Icon: ComponentType<{ className?: string }>;
+}> = [
+  { key: "showProfile", label: "Perfil horario", description: "Promedio de consumo por hora", Icon: PieChart },
+  { key: "showSummary", label: "Tabla resumen", description: "Resumen con tendencias", Icon: Table },
+  { key: "showPrev", label: "Comparar mes anterior", description: "Barras comparativas", Icon: BarChart2 },
+  { key: "showHeatmap", label: "Heatmap semanal", description: "Mapa de calor hora×día", Icon: Flame },
+  { key: "showCumulative", label: "Consumo acumulado", description: "Línea de consumo acumulado", Icon: TrendingUp },
+  { key: "showTopDays", label: "Top días de consumo", description: "Ranking de los 7 días con mayor consumo", Icon: Star },
+];
 
 function formatPrice(price: number) {
   return `${price.toFixed(3).replace(".", ",")} €/kWh`;
@@ -104,6 +135,14 @@ export default function InformesPage() {
   const [loadingDebugPayload, setLoadingDebugPayload] = useState(false);
   const [storedState, setStoredState] = useState<StoredFormState | null>(null);
   const [deviceRoles, setDeviceRoles] = useState<Record<string, string>>({});
+  const reportComponentState: Record<ReportComponentKey, boolean> = {
+    showProfile,
+    showSummary,
+    showPrev,
+    showHeatmap,
+    showCumulative,
+    showTopDays,
+  };
 
   useEffect(() => {
     const savedRaw = window.localStorage.getItem(STORAGE_KEY);
@@ -556,46 +595,57 @@ export default function InformesPage() {
 
       <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
         <h3 className="text-base font-semibold text-slate-200">Configuración del informe</h3>
-        <div className="grid gap-2 md:grid-cols-4">
-          <div>
-            <label className="text-xs text-slate-400 block mb-1">Color del informe</label>
-            <select
-              value={reportPalette}
-              onChange={(e) => setReportPalette(e.target.value)}
-              className="w-full rounded border border-slate-700 bg-slate-950 p-1.5 text-sm"
-            >
-              <option value="rojo">Rojo (defecto)</option>
-              <option value="azul">Azul</option>
-              <option value="verde">Verde</option>
-              <option value="morado">Morado</option>
-              <option value="oscuro">Oscuro</option>
-            </select>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <h4 className="text-sm font-medium text-slate-300">Color del informe</h4>
+            <div className="grid gap-2 grid-cols-3 sm:grid-cols-5">
+              {PALETTE_OPTIONS.map((palette) => (
+                <button
+                  key={palette.value}
+                  type="button"
+                  onClick={() => setReportPalette(palette.value)}
+                  className="inline-flex flex-col items-center gap-1 rounded-md border border-slate-700/80 bg-slate-900/40 px-2 py-2 text-xs text-slate-300 hover:border-slate-500"
+                >
+                  <span
+                    className={`h-6 w-6 rounded-full ${palette.colorClass} ${
+                      reportPalette === palette.value ? "ring-2 ring-white ring-offset-2 ring-offset-slate-950" : ""
+                    }`}
+                  />
+                  <span className="text-xs">{palette.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-col gap-2 md:col-span-3">
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={showProfile} onChange={(e) => setShowProfile(e.target.checked)} />
-              Perfil horario
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={showSummary} onChange={(e) => setShowSummary(e.target.checked)} />
-              Tabla resumen
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={showPrev} onChange={(e) => setShowPrev(e.target.checked)} />
-              Comparar mes anterior
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={showHeatmap} onChange={(e) => setShowHeatmap(e.target.checked)} />
-              Heatmap semanal
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={showCumulative} onChange={(e) => setShowCumulative(e.target.checked)} />
-              Consumo acumulado
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={showTopDays} onChange={(e) => setShowTopDays(e.target.checked)} />
-              Top dias consumo
-            </label>
+
+          <div className="space-y-2">
+            <h4 className="text-sm font-medium text-slate-300">Componentes del informe</h4>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {REPORT_COMPONENTS.map(({ key, label, description, Icon }) => (
+                <label key={key} className="flex items-start justify-between gap-3 rounded border border-slate-700 bg-slate-900/40 p-3">
+                  <span className="flex items-start gap-3">
+                    <Icon className="mt-0.5 h-4 w-4 text-slate-300" />
+                    <span>
+                      <span className="block text-sm text-slate-100">{label}</span>
+                      <span className="text-xs text-slate-400">{description}</span>
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={reportComponentState[key]}
+                    onChange={(event) => {
+                      const nextValue = event.target.checked;
+                      if (key === "showProfile") setShowProfile(nextValue);
+                      if (key === "showSummary") setShowSummary(nextValue);
+                      if (key === "showPrev") setShowPrev(nextValue);
+                      if (key === "showHeatmap") setShowHeatmap(nextValue);
+                      if (key === "showCumulative") setShowCumulative(nextValue);
+                      if (key === "showTopDays") setShowTopDays(nextValue);
+                    }}
+                    className="mt-0.5"
+                  />
+                </label>
+              ))}
+            </div>
           </div>
         </div>
       </div>
