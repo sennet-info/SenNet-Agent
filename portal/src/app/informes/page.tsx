@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ComponentType } from "react";
-import { BarChart2, ChevronDown, Flame, PieChart, Star, Table, TrendingUp } from "lucide-react";
+import { BarChart2, Check, ChevronDown, Cpu, Flame, Gauge, Lightbulb, PieChart, Plug, Star, Table, TrendingUp } from "lucide-react";
 
 import DebugPanel from "@/components/DebugPanel";
 import {
@@ -100,6 +100,8 @@ export default function InformesPage() {
   const [client, setClient] = useState("");
   const [sites, setSites] = useState<string[]>([]);
   const [site, setSite] = useState("");
+  const [selectedSite, setSelectedSite] = useState("");
+  const [siteQuery, setSiteQuery] = useState("");
   const [serials, setSerials] = useState<string[]>([]);
   const [serial, setSerial] = useState("");
   const [devices, setDevices] = useState<string[]>([]);
@@ -145,6 +147,35 @@ export default function InformesPage() {
     showTopDays,
   };
   const filteredDevices = devices.filter((d) => d.toLowerCase().includes(deviceSearch.toLowerCase()));
+  const filteredSites = siteQuery === "" ? sites : sites.filter((siteItem) => siteItem.toLowerCase().includes(siteQuery.toLowerCase()));
+  const isSiteOptionsOpen = Boolean(siteQuery && filteredSites.length > 0);
+  const deviceCards = filteredDevices.map((name) => {
+    const upperName = name.toUpperCase();
+    let group = "otros";
+    let Icon = Plug;
+    if (upperName.includes("GENERAL")) {
+      group = "general";
+      Icon = Gauge;
+    } else if (upperName.includes("LUZ") || upperName.includes("LIGHT")) {
+      group = "iluminacion";
+      Icon = Lightbulb;
+    } else if (upperName.includes("IN") || upperName.includes("ENTRADA")) {
+      group = "entradas";
+      Icon = Cpu;
+    }
+    return { id: name, name, group, icon: Icon };
+  });
+  const groupedDevices = deviceCards.reduce<Record<string, typeof deviceCards>>((acc, device) => {
+    if (!acc[device.group]) acc[device.group] = [];
+    acc[device.group].push(device);
+    return acc;
+  }, {});
+  const groupLabels: Record<string, string> = {
+    entradas: "Entradas",
+    general: "General",
+    iluminacion: "Iluminación",
+    otros: "Otros",
+  };
 
   useEffect(() => {
     const savedRaw = window.localStorage.getItem(STORAGE_KEY);
@@ -242,6 +273,7 @@ export default function InformesPage() {
         const storedSite = storedState?.site;
         const nextSite = storedSite && resp.items.includes(storedSite) ? storedSite : resp.items[0] ?? "";
         setSite(nextSite);
+        setSelectedSite(nextSite);
       })
       .finally(() => {
         if (!cancelled) setLoadingSites(false);
@@ -251,6 +283,15 @@ export default function InformesPage() {
       cancelled = true;
     };
   }, [tenant, client, storedState?.site]);
+
+  useEffect(() => {
+    setSelectedSite(site);
+  }, [site]);
+
+  useEffect(() => {
+    if (!selectedSite) return;
+    setSite(selectedSite);
+  }, [selectedSite]);
 
   useEffect(() => {
     if (!tenant || !client || !site) return;
@@ -502,12 +543,38 @@ export default function InformesPage() {
 
           <div className="space-y-1">
             <label htmlFor="site-select" className="text-xs text-slate-400">Instalación</label>
-            <select id="site-select" value={site} onChange={(event) => setSite(event.target.value)} disabled={!client || loadingSites} className="w-full rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60">
-              {loadingSites && <option>Cargando...</option>}
-              {!loadingSites && sites.map((item) => (
-                <option key={item}>{item}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <input
+                id="site-select"
+                type="text"
+                role="combobox"
+                aria-controls="site-options-list"
+                aria-expanded={isSiteOptionsOpen}
+                value={siteQuery || selectedSite}
+                onChange={(event) => setSiteQuery(event.target.value)}
+                onFocus={() => setSiteQuery("")}
+                disabled={!client || loadingSites}
+                placeholder={loadingSites ? "Cargando..." : "Buscar instalación"}
+                className="w-full rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60"
+              />
+              {isSiteOptionsOpen && (
+                <div id="site-options-list" className="absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-md border border-slate-700 bg-slate-900 shadow-lg">
+                  {filteredSites.map((siteItem) => (
+                    <button
+                      key={siteItem}
+                      type="button"
+                      onClick={() => {
+                        setSelectedSite(siteItem);
+                        setSiteQuery("");
+                      }}
+                      className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                    >
+                      {siteItem}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="space-y-1">
@@ -542,19 +609,36 @@ export default function InformesPage() {
           {filteredDevices.length === 0 ? (
             <p className="text-sm text-slate-400">No se encontraron dispositivos</p>
           ) : (
-            filteredDevices.map((device) => (
-              <label key={device} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(device)}
-                  onChange={(event) =>
-                    setSelected((prev) =>
-                      event.target.checked ? [...prev, device] : prev.filter((item) => item !== device),
-                    )
-                  }
-                />
-                {device}
-              </label>
+            Object.entries(groupedDevices).map(([group, groupItems]) => (
+              <div key={group} className="space-y-2 md:col-span-3">
+                <p className="text-sm font-semibold text-slate-300">{groupLabels[group] ?? group}</p>
+                <div className="grid gap-2 md:grid-cols-3">
+                  {groupItems.map((device) => {
+                    const isSelected = selected.includes(device.id);
+                    return (
+                      <button
+                        key={device.id}
+                        type="button"
+                        onClick={() =>
+                          setSelected((prev) =>
+                            isSelected ? prev.filter((item) => item !== device.id) : [...prev, device.id],
+                          )
+                        }
+                        className={`flex min-h-11 items-center justify-between rounded border p-3 text-left ${
+                          isSelected ? "border-emerald-600 bg-emerald-800/30" : "border-slate-700 bg-slate-900/40"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <device.icon className="h-4 w-4" aria-hidden="true" />
+                          <span className="sr-only">Icono de dispositivo</span>
+                          <span className="text-sm">{device.name}</span>
+                        </span>
+                        {isSelected && <Check className="h-4 w-4 text-emerald-400" aria-hidden="true" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             ))
           )}
         </fieldset>
