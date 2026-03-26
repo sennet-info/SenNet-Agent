@@ -101,8 +101,6 @@ export default function InformesPage() {
   const [sites, setSites] = useState<string[]>([]);
   const [site, setSite] = useState("");
   const [selectedSite, setSelectedSite] = useState("");
-  const [siteQuery, setSiteQuery] = useState("");
-  const [isSiteDropdownOpen, setIsSiteDropdownOpen] = useState(false);
   const [serials, setSerials] = useState<string[]>([]);
   const [serial, setSerial] = useState("");
   const [devices, setDevices] = useState<string[]>([]);
@@ -148,8 +146,6 @@ export default function InformesPage() {
     showTopDays,
   };
   const filteredDevices = devices.filter((d) => d.toLowerCase().includes(deviceSearch.toLowerCase()));
-  const filteredSites = siteQuery === "" ? sites : sites.filter((siteItem) => siteItem.toLowerCase().includes(siteQuery.toLowerCase()));
-  const isSiteOptionsOpen = isSiteDropdownOpen && filteredSites.length > 0;
   const deviceCards = filteredDevices.map((name) => {
     const upperName = name.toUpperCase();
     let group = "otros";
@@ -288,10 +284,6 @@ export default function InformesPage() {
   useEffect(() => {
     setSelectedSite(site);
   }, [site]);
-
-  useEffect(() => {
-    setSiteQuery(selectedSite);
-  }, [selectedSite]);
 
   useEffect(() => {
     if (!selectedSite) return;
@@ -547,54 +539,23 @@ export default function InformesPage() {
           </div>
 
           <div className="space-y-1">
-            <label htmlFor="site-select" className="text-xs text-slate-400">Instalación</label>
-            <div className="relative">
-              <input
-                id="site-select"
-                type="text"
-                role="combobox"
-                aria-controls="site-options-list"
-                aria-expanded={isSiteOptionsOpen}
-                value={siteQuery}
-                onChange={(event) => {
-                  setSiteQuery(event.target.value);
-                  setIsSiteDropdownOpen(true);
-                }}
-                onFocus={() => setIsSiteDropdownOpen(true)}
-                onBlur={() => setTimeout(() => setIsSiteDropdownOpen(false), 100)}
-                disabled={!client || loadingSites}
-                placeholder={loadingSites ? "Cargando..." : "Selecciona o busca instalación…"}
-                className="w-full rounded border border-slate-700 bg-slate-900/50 px-3 py-2 pr-10 text-sm text-slate-200 disabled:opacity-60"
-              />
-              <button
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => setIsSiteDropdownOpen((prev) => !prev)}
-                className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-300"
-                aria-label="Mostrar instalaciones"
-              >
-                <ChevronDown className={`h-4 w-4 transition-transform ${isSiteDropdownOpen ? "rotate-180" : "rotate-0"}`} />
-              </button>
-              {isSiteOptionsOpen && (
-                <div id="site-options-list" className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded border border-slate-700 bg-slate-800">
-                  {filteredSites.map((siteItem) => (
-                    <button
-                      key={siteItem}
-                      type="button"
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => {
-                        setSelectedSite(siteItem);
-                        setSiteQuery(siteItem);
-                        setIsSiteDropdownOpen(false);
-                      }}
-                      className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700"
-                    >
-                      {siteItem}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <label htmlFor="site" className="text-xs text-slate-400">Instalación</label>
+            <select
+              id="site"
+              className="w-full rounded border border-slate-700 bg-slate-900/50 px-2 py-1 text-sm text-slate-200"
+              value={selectedSite}
+              onChange={(event) => setSelectedSite(event.target.value)}
+              disabled={!client || loadingSites}
+            >
+              {loadingSites && <option value="">Cargando...</option>}
+              {!loadingSites && sites.length === 0 && <option value="">Sin instalaciones</option>}
+              {!loadingSites &&
+                sites.map((siteItem) => (
+                  <option key={siteItem} value={siteItem}>
+                    {siteItem}
+                  </option>
+                ))}
+            </select>
           </div>
 
           <div className="space-y-1">
@@ -636,15 +597,24 @@ export default function InformesPage() {
                   {groupItems.map((device) => {
                     const isSelected = selected.includes(device.id);
                     return (
-                      <button
+                      <div
                         key={device.id}
-                        type="button"
+                        role="button"
+                        tabIndex={0}
                         onClick={() =>
                           setSelected((prev) =>
                             isSelected ? prev.filter((item) => item !== device.id) : [...prev, device.id],
                           )
                         }
-                        className={`flex h-11 items-center justify-between rounded border bg-slate-900/40 p-2 text-left ${
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelected((prev) =>
+                              isSelected ? prev.filter((item) => item !== device.id) : [...prev, device.id],
+                            );
+                          }
+                        }}
+                        className={`flex h-11 cursor-pointer items-center justify-between rounded border bg-slate-900/40 p-2 text-left ${
                           isSelected ? "border-emerald-600 bg-emerald-800/30" : "border-slate-700 bg-slate-900/40"
                         }`}
                       >
@@ -654,7 +624,7 @@ export default function InformesPage() {
                           <span className="text-sm">{device.name}</span>
                         </span>
                         {isSelected && <Check className="h-4 w-4 text-emerald-400" aria-hidden="true" />}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
