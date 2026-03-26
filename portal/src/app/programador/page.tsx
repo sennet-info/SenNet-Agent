@@ -732,18 +732,6 @@ export default function ProgramadorPage() {
             {!!invalidEmails.length && <p className="mt-2 text-xs text-red-300">Hay correos inválidos marcados en rojo. Corrígelos o elimínalos.</p>}
           </div>
 
-          <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3 text-sm">
-            <h3 className="font-medium text-blue-200">E. Resumen antes de guardar</h3>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-200">
-              <li>Se programará un informe para la instalación <strong>{form.site || "(sin seleccionar)"}</strong>.</li>
-              <li>Dispositivo principal: <strong>{form.device || "(sin seleccionar)"}</strong>{extraDevices.length ? ` + ${extraDevices.length} dispositivos extra` : ""}.</li>
-              <li>Periodicidad: <strong>{frequencySummary}</strong>.</li>
-              <li>Periodo del informe: <strong>{toHumanRange(form.rangeMode)}</strong>.</li>
-              <li>Destinatarios: <strong>{validEmails.join(", ") || "(sin correos válidos)"}</strong>.</li>
-              <li>Opciones seleccionadas: <strong>{selectedOptions.join(", ") || "(ninguna)"}</strong>.</li>
-            </ul>
-          </div>
-
           <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
             <p className="text-sm font-medium text-slate-300">Opciones del informe</p>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -773,6 +761,18 @@ export default function ProgramadorPage() {
                 </label>
               ))}
             </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3 text-sm">
+            <h3 className="font-medium text-blue-200">E. Resumen antes de guardar</h3>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-200">
+              <li>Se programará un informe para la instalación <strong>{form.site || "(sin seleccionar)"}</strong>.</li>
+              <li>Dispositivo principal: <strong>{form.device || "(sin seleccionar)"}</strong>{extraDevices.length ? ` + ${extraDevices.length} dispositivos extra` : ""}.</li>
+              <li>Periodicidad: <strong>{frequencySummary}</strong>.</li>
+              <li>Periodo del informe: <strong>{toHumanRange(form.rangeMode)}</strong>.</li>
+              <li>Destinatarios: <strong>{validEmails.join(", ") || "(sin correos válidos)"}</strong>.</li>
+              <li>Opciones seleccionadas: <strong>{selectedOptions.join(", ") || "(ninguna)"}</strong>.</li>
+            </ul>
           </div>
           <button disabled={busy || !canSubmit} className="rounded bg-emerald-600 px-4 py-2 text-sm disabled:opacity-50" type="submit">
             Guardar tarea
