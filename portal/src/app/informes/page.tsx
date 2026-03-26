@@ -102,6 +102,7 @@ export default function InformesPage() {
   const [site, setSite] = useState("");
   const [selectedSite, setSelectedSite] = useState("");
   const [siteQuery, setSiteQuery] = useState("");
+  const [isSiteDropdownOpen, setIsSiteDropdownOpen] = useState(false);
   const [serials, setSerials] = useState<string[]>([]);
   const [serial, setSerial] = useState("");
   const [devices, setDevices] = useState<string[]>([]);
@@ -148,7 +149,7 @@ export default function InformesPage() {
   };
   const filteredDevices = devices.filter((d) => d.toLowerCase().includes(deviceSearch.toLowerCase()));
   const filteredSites = siteQuery === "" ? sites : sites.filter((siteItem) => siteItem.toLowerCase().includes(siteQuery.toLowerCase()));
-  const isSiteOptionsOpen = Boolean(siteQuery && filteredSites.length > 0);
+  const isSiteOptionsOpen = isSiteDropdownOpen && filteredSites.length > 0;
   const deviceCards = filteredDevices.map((name) => {
     const upperName = name.toUpperCase();
     let group = "otros";
@@ -551,23 +552,38 @@ export default function InformesPage() {
                 aria-controls="site-options-list"
                 aria-expanded={isSiteOptionsOpen}
                 value={siteQuery || selectedSite}
-                onChange={(event) => setSiteQuery(event.target.value)}
-                onFocus={() => setSiteQuery("")}
+                onChange={(event) => {
+                  setSiteQuery(event.target.value);
+                  setIsSiteDropdownOpen(true);
+                }}
+                onFocus={() => setIsSiteDropdownOpen(true)}
+                onBlur={() => setTimeout(() => setIsSiteDropdownOpen(false), 100)}
                 disabled={!client || loadingSites}
                 placeholder={loadingSites ? "Cargando..." : "Buscar instalación"}
-                className="w-full rounded border border-slate-700 bg-slate-950 p-2 disabled:opacity-60"
+                className="w-full rounded bg-slate-900/50 px-3 py-2 pr-10 disabled:opacity-60"
               />
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setIsSiteDropdownOpen((prev) => !prev)}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-300"
+                aria-label="Mostrar instalaciones"
+              >
+                <ChevronDown className={`h-4 w-4 transition-transform ${isSiteDropdownOpen ? "rotate-180" : "rotate-0"}`} />
+              </button>
               {isSiteOptionsOpen && (
-                <div id="site-options-list" className="absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-md border border-slate-700 bg-slate-900 shadow-lg">
+                <div id="site-options-list" className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded border border-slate-700 bg-slate-800">
                   {filteredSites.map((siteItem) => (
                     <button
                       key={siteItem}
                       type="button"
+                      onMouseDown={(event) => event.preventDefault()}
                       onClick={() => {
                         setSelectedSite(siteItem);
                         setSiteQuery("");
+                        setIsSiteDropdownOpen(false);
                       }}
-                      className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                      className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700"
                     >
                       {siteItem}
                     </button>
