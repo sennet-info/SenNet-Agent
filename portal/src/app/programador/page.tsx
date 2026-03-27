@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useState } from "react";
+import type { ComponentType } from "react";
+import { BarChart2, Flame, PieChart, Star, Table, TrendingUp } from "lucide-react";
 import {
   adminListTenants,
   discoveryClients,
@@ -42,6 +44,28 @@ const RANGE_COPY: Record<string, string> = {
   previous_full_month: "Genera el informe del mes cerrado anterior (mes completo).",
   last_30_days: "Incluye una ventana móvil de 30 días hasta la fecha de ejecución.",
 };
+
+type SchedulerOptionKey =
+  | "taskShowProfile"
+  | "taskShowSummary"
+  | "taskShowPrev"
+  | "taskShowHeatmap"
+  | "taskShowCumulative"
+  | "taskShowTopDays";
+
+const SCHEDULER_OPTIONS: Array<{
+  key: SchedulerOptionKey;
+  label: string;
+  description: string;
+  Icon: ComponentType<{ className?: string }>;
+}> = [
+  { key: "taskShowProfile", label: "Perfil horario", description: "Promedio de consumo por hora", Icon: PieChart },
+  { key: "taskShowSummary", label: "Tabla resumen", description: "Resumen con tendencias", Icon: Table },
+  { key: "taskShowPrev", label: "Comparar mes anterior", description: "Barras comparativas", Icon: BarChart2 },
+  { key: "taskShowHeatmap", label: "Heatmap semanal", description: "Mapa de calor hora×día", Icon: Flame },
+  { key: "taskShowCumulative", label: "Consumo acumulado", description: "Línea de consumo acumulado", Icon: TrendingUp },
+  { key: "taskShowTopDays", label: "Top días de consumo", description: "Ranking de los 7 días con mayor consumo", Icon: Star },
+];
 
 function splitCsv(value: string) {
   return value
@@ -202,6 +226,27 @@ export default function ProgramadorPage() {
   const validEmails = useMemo(() => form.emails.filter((email) => EMAIL_REGEX.test(email)), [form.emails]);
   const invalidEmails = useMemo(() => form.emails.filter((email) => !EMAIL_REGEX.test(email)), [form.emails]);
   const pendingEmailValid = useMemo(() => (emailInput ? EMAIL_REGEX.test(emailInput.trim()) : true), [emailInput]);
+  const schedulerOptionState: Record<SchedulerOptionKey, boolean> = {
+    taskShowProfile,
+    taskShowSummary,
+    taskShowPrev,
+    taskShowHeatmap,
+    taskShowCumulative,
+    taskShowTopDays,
+  };
+  const selectedOptions = useMemo(
+    () =>
+      SCHEDULER_OPTIONS.filter(({ key }) => {
+        if (key === "taskShowProfile") return taskShowProfile;
+        if (key === "taskShowSummary") return taskShowSummary;
+        if (key === "taskShowPrev") return taskShowPrev;
+        if (key === "taskShowHeatmap") return taskShowHeatmap;
+        if (key === "taskShowCumulative") return taskShowCumulative;
+        if (key === "taskShowTopDays") return taskShowTopDays;
+        return false;
+      }).map(({ label }) => label),
+    [taskShowProfile, taskShowSummary, taskShowPrev, taskShowHeatmap, taskShowCumulative, taskShowTopDays],
+  );
 
   const canSubmit = Boolean(
     token &&
@@ -438,7 +483,7 @@ export default function ProgramadorPage() {
 
       {tab === "new" && (
         <form onSubmit={submitTask} className="space-y-4 rounded-lg border border-slate-800 bg-slate-900/60 p-4">
-          <div className="rounded-md border border-slate-800 p-4">
+          <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
             <h3 className="text-lg font-medium">A. Alcance del informe</h3>
             <p className="mb-3 text-sm text-slate-400">Define para qué cliente e instalación se generará el informe automático.</p>
             <div className="grid gap-3 md:grid-cols-2">
@@ -583,7 +628,7 @@ export default function ProgramadorPage() {
             </div>
           </div>
 
-          <div className="rounded-md border border-slate-800 p-4">
+          <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
             <h3 className="text-lg font-medium">B. Contenido del informe</h3>
             <p className="mb-3 text-sm text-slate-400">Selecciona qué periodo cubrirá cada ejecución.</p>
             <label className="space-y-1 text-sm">
@@ -601,7 +646,7 @@ export default function ProgramadorPage() {
             </label>
           </div>
 
-          <div className="rounded-md border border-slate-800 p-4">
+          <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
             <h3 className="text-lg font-medium">C. Programación</h3>
             <p className="mb-3 text-sm text-slate-400">Define cada cuánto se envía y en qué momento se ejecuta.</p>
             <div className="grid gap-3 md:grid-cols-3">
@@ -650,7 +695,7 @@ export default function ProgramadorPage() {
             </div>
           </div>
 
-          <div className="rounded-md border border-slate-800 p-4">
+          <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
             <h3 className="text-lg font-medium">D. Destinatarios</h3>
             <p className="mb-3 text-sm text-slate-400">Introduce uno o varios correos para el envío automático.</p>
             <label className="space-y-1 text-sm">
@@ -687,7 +732,38 @@ export default function ProgramadorPage() {
             {!!invalidEmails.length && <p className="mt-2 text-xs text-red-300">Hay correos inválidos marcados en rojo. Corrígelos o elimínalos.</p>}
           </div>
 
-          <div className="rounded-md border border-blue-500/40 bg-blue-500/10 p-4 text-sm">
+          <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3">
+            <p className="text-sm font-medium text-slate-300">Opciones del informe</p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {SCHEDULER_OPTIONS.map(({ key, label, description, Icon }) => (
+                <label key={key} className="flex items-start justify-between gap-3 rounded border border-slate-700 bg-slate-900/40 p-3">
+                  <span className="flex items-start gap-3">
+                    <Icon className="mt-0.5 h-4 w-4 text-slate-300" />
+                    <span>
+                      <span className="block text-sm text-slate-100">{label}</span>
+                      <span className="text-xs text-slate-400">{description}</span>
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={schedulerOptionState[key]}
+                    onChange={(event) => {
+                      const nextValue = event.target.checked;
+                      if (key === "taskShowProfile") setTaskShowProfile(nextValue);
+                      if (key === "taskShowSummary") setTaskShowSummary(nextValue);
+                      if (key === "taskShowPrev") setTaskShowPrev(nextValue);
+                      if (key === "taskShowHeatmap") setTaskShowHeatmap(nextValue);
+                      if (key === "taskShowCumulative") setTaskShowCumulative(nextValue);
+                      if (key === "taskShowTopDays") setTaskShowTopDays(nextValue);
+                    }}
+                    className="mt-0.5"
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-4 space-y-3 text-sm">
             <h3 className="font-medium text-blue-200">E. Resumen antes de guardar</h3>
             <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-200">
               <li>Se programará un informe para la instalación <strong>{form.site || "(sin seleccionar)"}</strong>.</li>
@@ -695,19 +771,8 @@ export default function ProgramadorPage() {
               <li>Periodicidad: <strong>{frequencySummary}</strong>.</li>
               <li>Periodo del informe: <strong>{toHumanRange(form.rangeMode)}</strong>.</li>
               <li>Destinatarios: <strong>{validEmails.join(", ") || "(sin correos válidos)"}</strong>.</li>
+              <li>Opciones seleccionadas: <strong>{selectedOptions.join(", ") || "(ninguna)"}</strong>.</li>
             </ul>
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-slate-300">Opciones del informe</p>
-            <div className="flex flex-wrap gap-4 text-sm">
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={taskShowProfile} onChange={(e) => setTaskShowProfile(e.target.checked)} /> Perfil horario</label>
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={taskShowSummary} onChange={(e) => setTaskShowSummary(e.target.checked)} /> Tabla resumen</label>
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={taskShowPrev} onChange={(e) => setTaskShowPrev(e.target.checked)} /> Comparar mes anterior</label>
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={taskShowHeatmap} onChange={(e) => setTaskShowHeatmap(e.target.checked)} /> Heatmap semanal</label>
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={taskShowCumulative} onChange={(e) => setTaskShowCumulative(e.target.checked)} /> Consumo acumulado</label>
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={taskShowTopDays} onChange={(e) => setTaskShowTopDays(e.target.checked)} /> Top dias consumo</label>
-            </div>
           </div>
           <button disabled={busy || !canSubmit} className="rounded bg-emerald-600 px-4 py-2 text-sm disabled:opacity-50" type="submit">
             Guardar tarea
