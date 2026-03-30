@@ -65,6 +65,27 @@ export async function appendEvent(event: AlertEvent) {
   });
 }
 
+export async function deleteEvent(eventId: string) {
+  return withLock(async () => {
+    const events = await readJson<AlertEvent[]>(eventsPath, []);
+    const idx = events.findIndex((item) => item.id === eventId);
+    if (idx < 0) return null;
+    const [removed] = events.splice(idx, 1);
+    await atomicWrite(eventsPath, events);
+    return removed;
+  });
+}
+
+export async function clearEvents(options?: { onlyResolved?: boolean }) {
+  return withLock(async () => {
+    const events = await readJson<AlertEvent[]>(eventsPath, []);
+    const keep = options?.onlyResolved ? events.filter((item) => item.status !== "resolved") : [];
+    const removed = events.length - keep.length;
+    await atomicWrite(eventsPath, keep);
+    return { removed, remaining: keep.length };
+  });
+}
+
 export async function updateEvent(eventId: string, status: AlertEvent["status"]) {
   return withLock(async () => {
     const events = await readJson<AlertEvent[]>(eventsPath, []);

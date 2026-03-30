@@ -138,7 +138,7 @@ async function evalRule(rule: AlertRule, adapter: AlertsDataAdapter): Promise<Ru
   }
 
   if (rule.type === "irregular_interval") {
-    const expectedIntervalMinutes = Number(p.expectedIntervalMinutes ?? 5);
+    const expectedIntervalMinutes = Number(p.expectedIntervalMinutes ?? p.expectedMinutes ?? 5);
     const toleranceMinutes = Number(p.toleranceMinutes ?? 2);
     const observedGapMinutes = Number(p.mockObservedGapMinutes ?? expectedIntervalMinutes);
     const maxAllowed = expectedIntervalMinutes + toleranceMinutes;
