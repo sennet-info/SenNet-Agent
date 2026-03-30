@@ -37,6 +37,12 @@ Makefile            Comandos de test locales
 env.example         Plantilla de variables de entorno
 ```
 
+## Documentación operativa recomendada
+
+- Hardening de almacenamiento + preparación Docker/VPS: `docs/runbooks/beagle-storage-hardening-docker-vps.md`
+- Estrategia dashboards/auth (Chronograf + Keycloak + Portal): `docs/runbooks/dashboards-auth-chronograf-keycloak-plan.md`
+
+
 ## Deploy en BeaglePlay desde cero
 
 ### 1. Clonar el repo
