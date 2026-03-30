@@ -242,6 +242,22 @@ function eventStatusClass(status: AlertEvent["status"]) {
   return "bg-amber-900/60 text-amber-200";
 }
 
+function normalizeEventForView(event: AlertEvent) {
+  const fallbackAffected = Array.isArray((event.debug as Record<string, unknown> | undefined)?.affected)
+    ? ((event.debug as Record<string, unknown>).affected as Array<{ serial?: string; deviceId?: string; label?: string }>)
+    : [];
+
+  return {
+    ...event,
+    status: event.status ?? "active",
+    affected: event.affected ?? fallbackAffected,
+    scope: {
+      ...event.scope,
+      mode: event.scope?.mode ?? "grouped",
+    },
+  };
+}
+
 function FieldBlock({ label, help, children }: { label: string; help?: string; children: React.ReactNode }) {
   return (
     <label className="space-y-1 text-sm">
@@ -339,6 +355,7 @@ export default function AlertasPage() {
   const activeType = (form.type ?? "battery_low_any") as AlertRuleType;
   const typeConfig = alertTypeConfig[activeType];
   const params = (form.params ?? {}) as Record<string, unknown>;
+  const eventsForView = useMemo(() => events.map((event) => normalizeEventForView(event)), [events]);
 
   const patchScope = useCallback((patch: Partial<AlertRule["scope"]>) => {
     setForm((prev) => ({ ...prev, scope: { ...(prev.scope ?? baseScope), ...patch } }));
@@ -784,13 +801,13 @@ export default function AlertasPage() {
       ) : null}
 
       {tab === "events" ? (
-        events.length === 0 ? <p className="rounded-lg border border-dashed border-slate-700 p-6 text-sm text-slate-400">Sin eventos aún.</p> : (
+        eventsForView.length === 0 ? <p className="rounded-lg border border-dashed border-slate-700 p-6 text-sm text-slate-400">Sin eventos aún.</p> : (
           <div className="space-y-3">
             <div className="flex flex-wrap gap-2">
               <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => clearEvents(true)}>Limpiar solo resueltos</button>
               <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => clearEvents(false)}>Borrar todos los eventos</button>
             </div>
-            {events.map((event) => (
+            {eventsForView.map((event) => (
               <div key={event.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-medium">{event.ruleName}</p>
