@@ -344,6 +344,7 @@ export default function AlertasPage() {
   const [saving, setSaving] = useState(false);
   const [testingRuleId, setTestingRuleId] = useState<string | null>(null);
   const [runningNow, setRunningNow] = useState(false);
+  const [runFeedback, setRunFeedback] = useState<{ evaluated: number; fired: number; ranAt: string } | null>(null);
   const [validationResult, setValidationResult] = useState<AlertValidationDebug | null>(null);
   const [testParamsText, setTestParamsText] = useState("{}");
   const [form, setForm] = useState<Partial<AlertRule>>(emptyRule);
@@ -510,6 +511,7 @@ export default function AlertasPage() {
     }
     setTestingRuleId(ruleId);
     setError("");
+    setRunFeedback(null);
     try {
       const parsedParams = JSON.parse(testParamsText || "{}");
       const resp = await fetch(`/api/alerts/rules/${ruleId}/test`, { method: "POST", headers: authHeaders, body: JSON.stringify({ params: parsedParams }) });
@@ -575,10 +577,16 @@ export default function AlertasPage() {
     if (!token) return;
     setRunningNow(true);
     setError("");
+    setRunFeedback(null);
     try {
       const resp = await fetch("/api/alerts/run", { method: "POST", headers: authHeaders });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data?.detail ?? "No se pudo ejecutar el motor");
+      setRunFeedback({
+        evaluated: Number(data?.evaluated ?? 0),
+        fired: Number(data?.fired ?? 0),
+        ranAt: new Date().toISOString(),
+      });
       await loadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error ejecutando motor");
@@ -600,7 +608,8 @@ export default function AlertasPage() {
         <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-200">
           <li>Batería: evaluación con datos simulados en <code>params.mockBatteries</code>.</li>
           <li>Email: envío en modo preview (no entrega real), webhook sí intenta ejecución.</li>
-          <li>Flujo recomendado de prueba: cargar preset mock, validar regla y luego ejecutar el motor.</li>
+          <li><b>Validar</b> = simulación manual, no persiste eventos.</li>
+          <li><b>Ejecutar evaluación ahora</b> = ejecución real del motor, sí puede persistir eventos.</li>
         </ul>
       </div>
 
@@ -766,6 +775,9 @@ export default function AlertasPage() {
           </SectionCard>
 
           <SectionCard title="Reglas activas" subtitle="Listado de reglas creadas con lectura rápida de estado, severidad y alcance.">
+            <p className="mb-3 rounded-lg border border-cyan-800/50 bg-cyan-950/20 px-3 py-2 text-xs text-cyan-100">
+              Usa <b>Validar (simulación)</b> para comprobar lógica sin crear eventos reales. Para crear eventos persistidos usa <b>Estado → Ejecutar evaluación ahora</b>.
+            </p>
             {rules.length === 0 ? (
               <p className="rounded-lg border border-dashed border-slate-700 p-4 text-sm text-slate-400">Todavía no hay reglas creadas para este entorno.</p>
             ) : (
@@ -788,7 +800,7 @@ export default function AlertasPage() {
                     </div>
                     <p className="mt-2 text-xs text-slate-400">Última ejecución: {rule.lastRunAt ?? "-"} · Resultado: {rule.lastResult?.message ?? "-"}</p>
                     <div className="mt-3 flex gap-2">
-                      <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => testRule(rule.id)}>{testingRuleId === rule.id ? "Validando..." : "Validar"}</button>
+                      <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => testRule(rule.id)}>{testingRuleId === rule.id ? "Validando..." : "Validar (simulación)"}</button>
                       <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => { setEditingId(rule.id); setForm(rule); setTestParamsText(JSON.stringify(rule.params ?? {}, null, 2)); }}>Editar</button>
                       <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => removeRule(rule.id)}>Eliminar</button>
                     </div>
@@ -833,6 +845,9 @@ export default function AlertasPage() {
 
       {tab === "status" ? (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="rounded-xl border border-sky-800/60 bg-sky-950/20 p-4 md:col-span-2 xl:col-span-3">
+            <p className="text-sm text-sky-100"><b>Ejecución real del motor:</b> este botón llama a <code>POST /api/alerts/run</code>, evalúa reglas activas y puede persistir eventos en la pestaña Eventos.</p>
+          </div>
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4"><p className="text-sm text-slate-400">Motor</p><p className="text-xl">{status?.engineStatus ?? "-"}</p></div>
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4"><p className="text-sm text-slate-400">Última evaluación</p><p className="text-xl">{status?.lastRunAt ?? "-"}</p></div>
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4"><p className="text-sm text-slate-400">Reglas evaluadas</p><p className="text-xl">{status?.rulesEvaluated ?? 0}</p></div>
@@ -841,6 +856,16 @@ export default function AlertasPage() {
           <button disabled={runningNow} className="rounded-xl bg-blue-700 px-3 py-2 disabled:opacity-60" onClick={runEvaluationNow}>
             {runningNow ? "Ejecutando..." : "Ejecutar evaluación ahora"}
           </button>
+          {runFeedback ? (
+            <div className="rounded-xl border border-emerald-700/60 bg-emerald-950/30 p-4 md:col-span-2 xl:col-span-3">
+              <p className="text-sm text-emerald-100">
+                Ejecución real completada ({runFeedback.ranAt}): <b>{runFeedback.evaluated}</b> regla(s) evaluada(s), <b>{runFeedback.fired}</b> disparada(s).
+              </p>
+              <button className="mt-2 rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => setTab("events")}>
+                Ver eventos generados
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
       {validationResult ? <ValidationModal result={validationResult} onClose={() => setValidationResult(null)} /> : null}
