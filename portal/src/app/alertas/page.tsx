@@ -208,27 +208,24 @@ function csvToList(input: string) {
   return input.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
-const typeMockPresets: Record<AlertRuleType, Record<string, unknown>> = {
+const typeMockPresets: Record<AlertRuleType, { trigger: Record<string, unknown>; healthy: Record<string, unknown> }> = {
   battery_low_any: {
-    mockBatteries: [
-      { deviceId: "bat-1", battery: 17, serial: "GW-100", label: "Batería A" },
-      { deviceId: "bat-2", battery: 44, serial: "GW-100", label: "Batería B" },
-    ],
+    trigger: { mockBatteries: [{ deviceId: "bat-1", battery: 17, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 44, serial: "GW-100", label: "Batería B" }] },
+    healthy: { mockBatteries: [{ deviceId: "bat-1", battery: 60, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 74, serial: "GW-100", label: "Batería B" }] },
   },
   battery_low_all: {
-    mockBatteries: [
-      { deviceId: "bat-1", battery: 15, serial: "GW-100", label: "Batería A" },
-      { deviceId: "bat-2", battery: 19, serial: "GW-100", label: "Batería B" },
-    ],
+    trigger: { mockBatteries: [{ deviceId: "bat-1", battery: 15, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 19, serial: "GW-100", label: "Batería B" }] },
+    healthy: { mockBatteries: [{ deviceId: "bat-1", battery: 60, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 19, serial: "GW-100", label: "Batería B" }] },
   },
   battery_low: {
-    mockBatteries: [{ deviceId: "bat-1", battery: 16, serial: "GW-100", label: "Batería A" }],
+    trigger: { mockBatteries: [{ deviceId: "bat-1", battery: 16, serial: "GW-100", label: "Batería A" }] },
+    healthy: { mockBatteries: [{ deviceId: "bat-1", battery: 65, serial: "GW-100", label: "Batería A" }] },
   },
-  heartbeat: { mockLastPointMinutesAgo: 45 },
-  threshold: { mockValue: 120 },
-  daily_sum: { mockValue: 180 },
-  missing_field: { mockRows: [{ value: 12 }, { value: null }, {}] },
-  irregular_interval: { mockObservedGapMinutes: 12 },
+  heartbeat: { trigger: { mockLastPointMinutesAgo: 45 }, healthy: { mockLastPointMinutesAgo: 3 } },
+  threshold: { trigger: { mockValue: 120 }, healthy: { mockValue: -5 } },
+  daily_sum: { trigger: { mockValue: 180 }, healthy: { mockValue: 20 } },
+  missing_field: { trigger: { mockRows: [{ value: 12 }, { value: null }, {}] }, healthy: { mockRows: [{ value: 12 }, { value: 18 }] } },
+  irregular_interval: { trigger: { mockObservedGapMinutes: 12 }, healthy: { mockObservedGapMinutes: 5 } },
 };
 
 function isRuleUsingMockData(rule: AlertRule | Partial<AlertRule>) {
@@ -513,7 +510,12 @@ export default function AlertasPage() {
     setError("");
     setRunFeedback(null);
     try {
-      const parsedParams = JSON.parse(testParamsText || "{}");
+      let parsedParams: Record<string, unknown> = {};
+      try {
+        parsedParams = JSON.parse(testParamsText || "{}");
+      } catch {
+        throw new Error("JSON de prueba inválido. Corrige el formato antes de validar.");
+      }
       const resp = await fetch(`/api/alerts/rules/${ruleId}/test`, { method: "POST", headers: authHeaders, body: JSON.stringify({ params: parsedParams }) });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data?.detail ?? "No se pudo validar la regla");
@@ -594,6 +596,12 @@ export default function AlertasPage() {
       setRunningNow(false);
     }
   }, [authHeaders, loadAll, token]);
+
+  const applyMockPreset = useCallback((mode: "trigger" | "healthy") => {
+    const preset = { ...alertTypeConfig[activeType].defaults, ...typeMockPresets[activeType][mode] };
+    setForm((prev) => ({ ...prev, params: { ...(prev.params ?? {}), ...preset } }));
+    setTestParamsText(JSON.stringify({ ...(form.params ?? {}), ...preset }, null, 2));
+  }, [activeType, form.params]);
 
   return (
     <section className="space-y-6 text-slate-100">
@@ -710,14 +718,14 @@ export default function AlertasPage() {
             {typeConfig.render({ params, onChange: patchParams })}
           </SectionCard>
 
-          <SectionCard title="4) Flujo de prueba controlado" subtitle="Inyecta datos mock de forma reproducible para validar edge/level/cooldown antes de conectar datos reales.">
+          <SectionCard title="4) Flujo de prueba controlado" subtitle="Inyecta datos mock de forma reproducible para validar cada tipo de regla y su transición edge/level/cooldown.">
             <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
-                <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => {
-                  const preset = { ...typeMockPresets[activeType], ...alertTypeConfig[activeType].defaults };
-                  setForm((prev) => ({ ...prev, params: { ...(prev.params ?? {}), ...preset } }));
-                }}>
-                  Cargar preset mock para {typeConfig.label}
+                <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => applyMockPreset("trigger")}>
+                  Preset dispara ({typeConfig.label})
+                </button>
+                <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => applyMockPreset("healthy")}>
+                  Preset no dispara
                 </button>
                 <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => setTestParamsText(JSON.stringify(form.params ?? {}, null, 2))}>
                   Restaurar desde formulario
@@ -729,7 +737,7 @@ export default function AlertasPage() {
                 onChange={(e) => setTestParamsText(e.target.value)}
                 placeholder='{"mockValue": 120}'
               />
-              <p className="text-xs text-slate-400">Este JSON se usa en “Validar” sin sobrescribir la regla guardada. Si hay error de formato JSON, la validación lo reporta.</p>
+              <p className="text-xs text-slate-400">Este JSON se usa en “Validar (simulación)” sin sobrescribir la regla guardada. Para persistir eventos usa “Estado → Ejecutar evaluación ahora”.</p>
             </div>
           </SectionCard>
 

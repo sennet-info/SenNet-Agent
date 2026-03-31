@@ -15,6 +15,7 @@ type RuleEvalResult = {
   typeSpecificDebug: Record<string, unknown>;
   affected: Array<{ serial?: string; deviceId?: string; label?: string }>;
 };
+type AffectedItem = { serial?: string; deviceId?: string; label?: string };
 
 type AlertsDataAdapter = {
   getBatterySamples: (rule: AlertRule) => Promise<BatterySample[]>;
@@ -39,8 +40,19 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function fallbackAffectedFromScope(rule: AlertRule): AffectedItem[] {
+  if (rule.scope.deviceIds?.length) {
+    return rule.scope.deviceIds.map((deviceId) => ({ deviceId, label: deviceId }));
+  }
+  if (rule.scope.serials?.length) {
+    return rule.scope.serials.map((serial) => ({ serial, label: serial }));
+  }
+  return [];
+}
+
 function buildEventsFromResult(rule: AlertRule, result: RuleEvalResult): AlertEvent[] {
   if (!result.fired) return [];
+  const effectiveAffected = result.affected.length ? result.affected : fallbackAffectedFromScope(rule);
 
   if (rule.scope.mode === "grouped") {
     return [
@@ -51,7 +63,7 @@ function buildEventsFromResult(rule: AlertRule, result: RuleEvalResult): AlertEv
         ruleId: rule.id,
         ruleName: rule.name,
         scope: rule.scope,
-        affected: result.affected,
+        affected: effectiveAffected,
         message: result.message,
         details: "Condición de alerta activada",
         debug: result.typeSpecificDebug,
@@ -60,7 +72,8 @@ function buildEventsFromResult(rule: AlertRule, result: RuleEvalResult): AlertEv
     ];
   }
 
-  return result.affected.map((item) => ({
+  const perDeviceSeed: AffectedItem[] = effectiveAffected.length ? effectiveAffected : [{ label: "scope" }];
+  return perDeviceSeed.map((item) => ({
     id: randomUUID(),
     timestamp: nowIso(),
     severity: rule.severity,
