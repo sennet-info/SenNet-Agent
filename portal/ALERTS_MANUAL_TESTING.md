@@ -39,6 +39,7 @@ Esta guía documenta cómo probar end-to-end el módulo de alertas del portal en
   - compara `mockValue` vs `target` con el operador configurado.
 - `battery_low`, `battery_low_any`, `battery_low_all`
   - usan `mockBatteries`, validar umbral y diferencia `ANY` vs `ALL`.
+  - en `per_device`, verificar transición por equipo: FAIL->OK debe generar recuperación individual.
 
 ## Estado funcional actual
 

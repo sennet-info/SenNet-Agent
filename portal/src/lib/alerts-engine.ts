@@ -92,6 +92,30 @@ function buildEventsFromResult(rule: AlertRule, result: RuleEvalResult): AlertEv
   }));
 }
 
+function getEntityKey(item: AffectedItem, idx = 0) {
+  return item.deviceId ?? item.serial ?? item.label ?? `entity-${idx}`;
+}
+
+function buildRecoveryEvent(rule: AlertRule, item: AffectedItem, sourceMessage: string): AlertEvent {
+  return {
+    id: randomUUID(),
+    timestamp: nowIso(),
+    severity: rule.severity,
+    ruleId: rule.id,
+    ruleName: rule.name,
+    scope: {
+      ...rule.scope,
+      serials: item.serial ? [item.serial] : rule.scope.serials,
+      deviceIds: item.deviceId ? [item.deviceId] : [],
+    },
+    affected: [item],
+    message: `Recuperación: ${item.label ?? item.deviceId ?? item.serial ?? "entidad"} · ${sourceMessage}`,
+    details: "Condición de alerta recuperada",
+    debug: { transition: "fail_to_ok" },
+    status: "resolved",
+  };
+}
+
 function evaluateComparison(value: number, threshold: number, operator: string) {
   if (operator === "<" || operator === "lt") return value < threshold;
   if (operator === "<=" || operator === "lte") return value <= threshold;
@@ -214,23 +238,92 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
   const elapsed = Date.now() - t0;
 
   const previousOk = rule.lastResult?.ok ?? true;
-  const shouldNotifyByEdge = rule.notifications.triggerMode === "edge" ? previousOk !== !result.fired : result.fired;
-  const edgeReason = rule.notifications.triggerMode === "edge"
-    ? (shouldNotifyByEdge ? "Cambio de estado detectado" : "Sin cambio de borde respecto al estado previo")
-    : (result.fired ? "Modo level notifica mientras la condición esté activa" : "Modo level sin condición activa");
-
   const cooldownMs = rule.notifications.cooldownMinutes * 60 * 1000;
-  const elapsedSinceLastTrigger = rule.lastTriggeredAt ? Date.now() - new Date(rule.lastTriggeredAt).getTime() : cooldownMs;
-  const cooldownPass = !rule.lastTriggeredAt || elapsedSinceLastTrigger >= cooldownMs;
-  const cooldownRemaining = Math.max(0, cooldownMs - elapsedSinceLastTrigger);
+  const failureEvents = buildEventsFromResult(rule, result);
+  const rawParams = (rule.params ?? {}) as Record<string, unknown>;
+  const prevEntityKeys = Array.isArray(rawParams.__activeEntityKeys) ? (rawParams.__activeEntityKeys as string[]) : [];
+  const prevEntityMeta = (rawParams.__activeEntityMeta ?? {}) as Record<string, AffectedItem>;
+  const prevEntityLastNotifiedAt = (rawParams.__entityLastNotifiedAt ?? {}) as Record<string, string>;
 
-  const simulatedEvents = buildEventsFromResult(rule, result);
-  const wouldCreateEvents = result.fired && shouldNotifyByEdge && cooldownPass;
+  let simulatedEvents: AlertEvent[] = [];
+  let edgeReason = "";
+  let cooldownPass = true;
+  let cooldownRemaining = 0;
+  let cooldownBlocked = false;
+
+  if (rule.scope.mode === "grouped") {
+    const shouldNotifyByEdge = rule.notifications.triggerMode === "edge" ? previousOk !== !result.fired : result.fired;
+    edgeReason = rule.notifications.triggerMode === "edge"
+      ? (shouldNotifyByEdge ? "Cambio de estado de grupo detectado" : "Sin cambio de borde de grupo respecto al estado previo")
+      : (result.fired ? "Modo level notifica mientras la condición de grupo esté activa" : "Modo level sin condición activa");
+    const elapsedSinceLastTrigger = rule.lastTriggeredAt ? Date.now() - new Date(rule.lastTriggeredAt).getTime() : cooldownMs;
+    cooldownPass = !rule.lastTriggeredAt || elapsedSinceLastTrigger >= cooldownMs;
+    cooldownRemaining = Math.max(0, cooldownMs - elapsedSinceLastTrigger);
+
+    if (result.fired && shouldNotifyByEdge) {
+      simulatedEvents = failureEvents;
+    }
+    if (!result.fired && !previousOk && shouldNotifyByEdge) {
+      simulatedEvents = [
+        {
+          id: randomUUID(),
+          timestamp: nowIso(),
+          severity: rule.severity,
+          ruleId: rule.id,
+          ruleName: rule.name,
+          scope: rule.scope,
+          affected: fallbackAffectedFromScope(rule),
+          message: `Recuperación de grupo: ${rule.name}`,
+          details: "Condición de alerta recuperada",
+          debug: { transition: "fail_to_ok", mode: "grouped" },
+          status: "resolved",
+        },
+      ];
+    }
+    if (simulatedEvents.length && !cooldownPass) {
+      cooldownBlocked = true;
+      simulatedEvents = [];
+    }
+  } else {
+    const currentMap = new Map<string, AffectedItem>();
+    for (const [idx, event] of failureEvents.entries()) {
+      const item = event.affected[0] ?? { label: `entity-${idx}` };
+      currentMap.set(getEntityKey(item, idx), item);
+    }
+    const currentKeys = Array.from(currentMap.keys());
+    const currentKeySet = new Set(currentKeys);
+    const prevKeySet = new Set(prevEntityKeys);
+    const enteredFailKeys = currentKeys.filter((key) => !prevKeySet.has(key));
+    const recoveredKeys = prevEntityKeys.filter((key) => !currentKeySet.has(key));
+
+    const failKeysToEmit = rule.notifications.triggerMode === "edge" ? enteredFailKeys : currentKeys;
+    const failEventsToEmit = failureEvents.filter((event, idx) => {
+      const item = event.affected[0] ?? { label: `entity-${idx}` };
+      return failKeysToEmit.includes(getEntityKey(item, idx));
+    });
+    const recoveryEventsToEmit = recoveredKeys.map((key) => buildRecoveryEvent(rule, prevEntityMeta[key] ?? { label: key }, result.message));
+    const candidateEvents = [...failEventsToEmit, ...recoveryEventsToEmit];
+
+    simulatedEvents = candidateEvents.filter((event, idx) => {
+      const key = getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx);
+      const lastNotifiedAt = prevEntityLastNotifiedAt[key];
+      const elapsedSinceLast = lastNotifiedAt ? Date.now() - new Date(lastNotifiedAt).getTime() : cooldownMs;
+      return elapsedSinceLast >= cooldownMs;
+    });
+    cooldownBlocked = simulatedEvents.length < candidateEvents.length;
+
+    edgeReason = rule.notifications.triggerMode === "edge"
+      ? `Transiciones por entidad: fail=${enteredFailKeys.length}, recovery=${recoveredKeys.length}`
+      : `Modo level por entidad: activas=${currentKeys.length}, recovery=${recoveredKeys.length}`;
+    cooldownPass = simulatedEvents.length === candidateEvents.length;
+    cooldownRemaining = cooldownPass ? 0 : cooldownMs;
+  }
+
+  const wouldCreateEvents = simulatedEvents.length > 0;
   const wouldNotify = wouldCreateEvents;
   const suppressedBy = [
-    ...(result.fired ? [] : ["condition_false"]),
-    ...(result.fired && !shouldNotifyByEdge ? ["edge"] : []),
-    ...(result.fired && shouldNotifyByEdge && !cooldownPass ? ["cooldown"] : []),
+    ...(simulatedEvents.length ? [] : ["edge_or_condition"]),
+    ...(cooldownBlocked ? ["cooldown"] : []),
   ];
 
   const deliveryPreview = wouldNotify ? previewDelivery(rule) : undefined;
@@ -269,7 +362,7 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
     },
     edge_decision: {
       trigger_mode: rule.notifications.triggerMode,
-      should_notify_by_edge: shouldNotifyByEdge,
+      should_notify_by_edge: simulatedEvents.length > 0,
       reason: edgeReason,
     },
     cooldown_decision: {
@@ -278,7 +371,7 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
       cooldown_remaining_ms: cooldownRemaining,
       reason: cooldownPass ? "Cooldown cumplido" : "Cooldown activo",
     },
-    would_create_events: wouldCreateEvents,
+    would_create_events: simulatedEvents.length > 0,
     simulated_events: simulatedEvents,
     would_notify: wouldNotify,
     suppressed_by: suppressedBy,
@@ -304,8 +397,24 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
   }
 
   const markNow = nowIso();
+  const entityLastNotifiedAt = { ...prevEntityLastNotifiedAt };
+  for (const [idx, event] of createdEvents.entries()) {
+    const key = getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx);
+    entityLastNotifiedAt[key] = markNow;
+  }
+  const currentEntityMap = new Map<string, AffectedItem>();
+  for (const [idx, event] of failureEvents.entries()) {
+    const item = event.affected[0] ?? { label: `entity-${idx}` };
+    currentEntityMap.set(getEntityKey(item, idx), item);
+  }
   const updatedRule: AlertRule = {
     ...rule,
+    params: {
+      ...rawParams,
+      __activeEntityKeys: Array.from(currentEntityMap.keys()),
+      __activeEntityMeta: Object.fromEntries(currentEntityMap.entries()),
+      __entityLastNotifiedAt: entityLastNotifiedAt,
+    },
     lastRunAt: markNow,
     lastResult: { ok: !result.fired, message: result.message },
     lastTriggeredAt: createdEvents.length ? markNow : rule.lastTriggeredAt,
