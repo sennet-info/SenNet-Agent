@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 
 import { notifyForEvent, previewDelivery } from "@/lib/alerts-notify";
 import { AlertEvent, AlertRule, AlertValidationDebug } from "@/lib/alerts-types";
-import { appendEvent, getState, listRules, saveRules, saveState } from "@/lib/alerts-store";
+import { appendEvent, getState, listRules, resolveActiveEventsByRule, saveRules, saveState } from "@/lib/alerts-store";
 
 type BatterySample = { deviceId: string; battery: number; serial?: string; label?: string; ts?: string };
 
@@ -395,6 +395,12 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
       };
       await appendEvent(enrichedEvent);
       createdEvents.push(enrichedEvent);
+    }
+    const recoveryKeys = createdEvents
+      .filter((event) => event.status === "resolved")
+      .map((event, idx) => getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx));
+    if (recoveryKeys.length) {
+      await resolveActiveEventsByRule(rule.id, recoveryKeys);
     }
   }
 

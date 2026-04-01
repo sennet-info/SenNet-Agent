@@ -99,6 +99,31 @@ export async function updateEvent(eventId: string, status: AlertEvent["status"])
   });
 }
 
+export async function resolveActiveEventsByRule(ruleId: string, entityKeys: string[]) {
+  return withLock(async () => {
+    const events = await readJson<AlertEvent[]>(eventsPath, []);
+    const keySet = new Set(entityKeys);
+    let updatedCount = 0;
+    const next = events.map((event) => {
+      if (event.ruleId !== ruleId || event.status !== "active") return event;
+      if (!keySet.size) {
+        updatedCount += 1;
+        return { ...event, status: "resolved" as const };
+      }
+      const affectedKeys = (event.affected ?? []).map((item) => item.deviceId ?? item.serial ?? item.label).filter(Boolean) as string[];
+      if (affectedKeys.some((key) => keySet.has(key))) {
+        updatedCount += 1;
+        return { ...event, status: "resolved" as const };
+      }
+      return event;
+    });
+    if (updatedCount) {
+      await atomicWrite(eventsPath, next);
+    }
+    return { updatedCount };
+  });
+}
+
 export async function getState() {
   return readJson<AlertsState>(statePath, {
     engineStatus: "ok",

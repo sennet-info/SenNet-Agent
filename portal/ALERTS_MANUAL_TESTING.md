@@ -49,6 +49,15 @@ Esta guía documenta cómo probar end-to-end el módulo de alertas del portal en
   - email en preview (sin entrega real).
   - webhook sí se intenta ejecutar.
 
+## Semántica de recuperación automática
+
+- `per_device`
+  - transición independiente por entidad (`deviceId`/`serial`).
+  - emite recuperación automática por cada entidad que pasa de FAIL a OK.
+- `grouped`
+  - transición global de la regla.
+  - solo emite recuperación cuando el grupo completo vuelve a OK.
+
 ## Caso reproducible A/B (fallo y recuperación escalonada)
 
 1. Configurar una regla `battery_low_any` con dos dispositivos (`A`, `B`) en `per_device`.
