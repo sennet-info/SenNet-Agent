@@ -280,7 +280,8 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
         },
       ];
     }
-    if (simulatedEvents.length && !cooldownPass) {
+    const isRecoveryEvent = simulatedEvents.some((event) => event.status === "resolved");
+    if (simulatedEvents.length && !cooldownPass && !isRecoveryEvent) {
       cooldownBlocked = true;
       simulatedEvents = [];
     }
@@ -305,6 +306,7 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
     const candidateEvents = [...failEventsToEmit, ...recoveryEventsToEmit];
 
     simulatedEvents = candidateEvents.filter((event, idx) => {
+      if (event.status === "resolved") return true;
       const key = getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx);
       const lastNotifiedAt = prevEntityLastNotifiedAt[key];
       const elapsedSinceLast = lastNotifiedAt ? Date.now() - new Date(lastNotifiedAt).getTime() : cooldownMs;

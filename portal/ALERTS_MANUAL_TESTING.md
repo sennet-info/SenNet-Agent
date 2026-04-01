@@ -48,3 +48,16 @@ Esta guía documenta cómo probar end-to-end el módulo de alertas del portal en
   - baterías evaluadas desde `params.mockBatteries`.
   - email en preview (sin entrega real).
   - webhook sí se intenta ejecutar.
+
+## Caso reproducible A/B (fallo y recuperación escalonada)
+
+1. Configurar una regla `battery_low_any` con dos dispositivos (`A`, `B`) en `per_device`.
+2. Run #1: ambos en OK (`A=70`, `B=75`) => sin evento.
+3. Run #2: `A` en fallo (`A=10`, `B=75`) => evento fallo de `A`.
+4. Run #3: `A` y `B` en fallo (`A=10`, `B=12`) => evento fallo de `B`.
+5. Run #4: `A` recupera (`A=70`, `B=12`) => evento recuperación de `A`.
+6. Run #5: `B` recupera (`A=70`, `B=75`) => evento recuperación de `B`.
+
+Esperado tras el fix:
+- no se pierde la recuperación del segundo dispositivo;
+- en `grouped`, solo hay recuperación cuando el grupo completo vuelve a estado sano.
