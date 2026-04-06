@@ -70,3 +70,11 @@ Esta guía documenta cómo probar end-to-end el módulo de alertas del portal en
 Esperado tras el fix:
 - no se pierde la recuperación del segundo dispositivo;
 - en `grouped`, solo hay recuperación cuando el grupo completo vuelve a estado sano.
+
+## Trazabilidad técnica en debug
+
+En la validación técnica (`result.debug.type_specific_debug`) revisar:
+- `enteredFailKeys`
+- `recoveredKeys`
+- `previousEntityState`
+- `currentEntityState`

@@ -16,6 +16,7 @@ type RuleEvalResult = {
   affected: Array<{ serial?: string; deviceId?: string; label?: string }>;
 };
 type AffectedItem = { serial?: string; deviceId?: string; label?: string };
+type EntityStateMap = Record<string, { status: "ok" | "fail"; lastChangeAt: string; meta?: AffectedItem }>;
 
 type AlertsDataAdapter = {
   getBatterySamples: (rule: AlertRule) => Promise<BatterySample[]>;
@@ -244,12 +245,16 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
   const prevEntityKeys = Array.isArray(rawParams.__activeEntityKeys) ? (rawParams.__activeEntityKeys as string[]) : [];
   const prevEntityMeta = (rawParams.__activeEntityMeta ?? {}) as Record<string, AffectedItem>;
   const prevEntityLastNotifiedAt = (rawParams.__entityLastNotifiedAt ?? {}) as Record<string, string>;
+  const prevEntityState = (rawParams.__entityState ?? {}) as EntityStateMap;
 
   let simulatedEvents: AlertEvent[] = [];
   let edgeReason = "";
   let cooldownPass = true;
   let cooldownRemaining = 0;
   let cooldownBlocked = false;
+  let enteredFailKeys: string[] = [];
+  let recoveredKeys: string[] = [];
+  let currentEntityState: EntityStateMap = {};
 
   if (rule.scope.mode === "grouped") {
     const shouldNotifyByEdge = rule.notifications.triggerMode === "edge" ? previousOk !== !result.fired : result.fired;
@@ -291,11 +296,30 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
       const item = event.affected[0] ?? { label: `entity-${idx}` };
       currentMap.set(getEntityKey(item, idx), item);
     }
-    const currentKeys = Array.from(currentMap.keys());
-    const currentKeySet = new Set(currentKeys);
-    const prevKeySet = new Set(prevEntityKeys);
-    const enteredFailKeys = currentKeys.filter((key) => !prevKeySet.has(key));
-    const recoveredKeys = prevEntityKeys.filter((key) => !currentKeySet.has(key));
+    const now = nowIso();
+    const knownKeys = new Set<string>([
+      ...Object.keys(prevEntityState),
+      ...prevEntityKeys,
+      ...Array.from(currentMap.keys()),
+      ...(rule.scope.deviceIds ?? []),
+      ...(rule.scope.serials ?? []),
+    ]);
+    currentEntityState = {};
+    enteredFailKeys = [];
+    recoveredKeys = [];
+    for (const key of knownKeys) {
+      const prev = prevEntityState[key];
+      const prevStatus = prev?.status ?? "ok";
+      const currStatus: "ok" | "fail" = currentMap.has(key) ? "fail" : "ok";
+      if (prevStatus === "ok" && currStatus === "fail") enteredFailKeys.push(key);
+      if (prevStatus === "fail" && currStatus === "ok") recoveredKeys.push(key);
+      currentEntityState[key] = {
+        status: currStatus,
+        lastChangeAt: prevStatus === currStatus ? (prev?.lastChangeAt ?? now) : now,
+        meta: currentMap.get(key) ?? prev?.meta ?? prevEntityMeta[key],
+      };
+    }
+    const currentKeys = Object.entries(currentEntityState).filter(([, value]) => value.status === "fail").map(([key]) => key);
 
     const failKeysToEmit = rule.notifications.triggerMode === "edge" ? enteredFailKeys : currentKeys;
     const failEventsToEmit = failureEvents.filter((event, idx) => {
@@ -378,7 +402,13 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
     would_notify: wouldNotify,
     suppressed_by: suppressedBy,
     delivery_preview: deliveryPreview,
-    type_specific_debug: result.typeSpecificDebug,
+    type_specific_debug: {
+      ...result.typeSpecificDebug,
+      enteredFailKeys,
+      recoveredKeys,
+      previousEntityState: prevEntityState,
+      currentEntityState,
+    },
   };
 
   const createdEvents: AlertEvent[] = [];
@@ -422,6 +452,7 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
       __activeEntityKeys: Array.from(currentEntityMap.keys()),
       __activeEntityMeta: Object.fromEntries(currentEntityMap.entries()),
       __entityLastNotifiedAt: entityLastNotifiedAt,
+      __entityState: currentEntityState,
     },
     lastRunAt: markNow,
     lastResult: { ok: !result.fired, message: result.message },
