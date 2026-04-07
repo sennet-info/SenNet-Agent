@@ -208,6 +208,53 @@ function csvToList(input: string) {
   return input.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
+const typeMockPresets: Record<AlertRuleType, { trigger: Record<string, unknown>; healthy: Record<string, unknown> }> = {
+  battery_low_any: {
+    trigger: { mockBatteries: [{ deviceId: "bat-1", battery: 17, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 44, serial: "GW-100", label: "Batería B" }] },
+    healthy: { mockBatteries: [{ deviceId: "bat-1", battery: 60, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 74, serial: "GW-100", label: "Batería B" }] },
+  },
+  battery_low_all: {
+    trigger: { mockBatteries: [{ deviceId: "bat-1", battery: 15, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 19, serial: "GW-100", label: "Batería B" }] },
+    healthy: { mockBatteries: [{ deviceId: "bat-1", battery: 60, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 19, serial: "GW-100", label: "Batería B" }] },
+  },
+  battery_low: {
+    trigger: { mockBatteries: [{ deviceId: "bat-1", battery: 16, serial: "GW-100", label: "Batería A" }] },
+    healthy: { mockBatteries: [{ deviceId: "bat-1", battery: 65, serial: "GW-100", label: "Batería A" }] },
+  },
+  heartbeat: { trigger: { mockLastPointMinutesAgo: 45 }, healthy: { mockLastPointMinutesAgo: 3 } },
+  threshold: { trigger: { mockValue: 120 }, healthy: { mockValue: -5 } },
+  daily_sum: { trigger: { mockValue: 180 }, healthy: { mockValue: 20 } },
+  missing_field: { trigger: { mockRows: [{ value: 12 }, { value: null }, {}] }, healthy: { mockRows: [{ value: 12 }, { value: 18 }] } },
+  irregular_interval: { trigger: { mockObservedGapMinutes: 12 }, healthy: { mockObservedGapMinutes: 5 } },
+};
+
+function isRuleUsingMockData(rule: AlertRule | Partial<AlertRule>) {
+  const params = (rule.params ?? {}) as Record<string, unknown>;
+  return Object.keys(params).some((key) => key.startsWith("mock"));
+}
+
+function eventStatusClass(status: AlertEvent["status"]) {
+  if (status === "resolved") return "bg-emerald-900/60 text-emerald-200";
+  if (status === "ack") return "bg-blue-900/60 text-blue-200";
+  return "bg-amber-900/60 text-amber-200";
+}
+
+function normalizeEventForView(event: AlertEvent) {
+  const fallbackAffected = Array.isArray((event.debug as Record<string, unknown> | undefined)?.affected)
+    ? ((event.debug as Record<string, unknown>).affected as Array<{ serial?: string; deviceId?: string; label?: string }>)
+    : [];
+
+  return {
+    ...event,
+    status: event.status ?? "active",
+    affected: event.affected ?? fallbackAffected,
+    scope: {
+      ...event.scope,
+      mode: event.scope?.mode ?? "grouped",
+    },
+  };
+}
+
 function FieldBlock({ label, help, children }: { label: string; help?: string; children: React.ReactNode }) {
   return (
     <label className="space-y-1 text-sm">
@@ -293,7 +340,10 @@ export default function AlertasPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testingRuleId, setTestingRuleId] = useState<string | null>(null);
+  const [runningNow, setRunningNow] = useState(false);
+  const [runFeedback, setRunFeedback] = useState<{ evaluated: number; fired: number; ranAt: string } | null>(null);
   const [validationResult, setValidationResult] = useState<AlertValidationDebug | null>(null);
+  const [testParamsText, setTestParamsText] = useState("{}");
   const [form, setForm] = useState<Partial<AlertRule>>(emptyRule);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [discovery, setDiscovery] = useState<DiscoveryState>({ tenants: [], clients: [], sites: [], serials: [], devices: [] });
@@ -303,6 +353,7 @@ export default function AlertasPage() {
   const activeType = (form.type ?? "battery_low_any") as AlertRuleType;
   const typeConfig = alertTypeConfig[activeType];
   const params = (form.params ?? {}) as Record<string, unknown>;
+  const eventsForView = useMemo(() => events.map((event) => normalizeEventForView(event)), [events]);
 
   const patchScope = useCallback((patch: Partial<AlertRule["scope"]>) => {
     setForm((prev) => ({ ...prev, scope: { ...(prev.scope ?? baseScope), ...patch } }));
@@ -317,12 +368,18 @@ export default function AlertasPage() {
   }, []);
 
   const resetFormForType = useCallback((type: AlertRuleType) => {
-    setForm((prev) => ({ ...prev, type, params: { ...alertTypeConfig[type].defaults } }));
+    const nextParams = { ...alertTypeConfig[type].defaults };
+    setForm((prev) => ({ ...prev, type, params: nextParams }));
+    setTestParamsText(JSON.stringify(nextParams, null, 2));
   }, []);
 
   useEffect(() => {
     setToken(window.localStorage.getItem("agent_admin_token") ?? "");
   }, []);
+
+  useEffect(() => {
+    setTestParamsText(JSON.stringify(form.params ?? {}, null, 2));
+  }, [form.params, editingId]);
 
   const loadTenants = useCallback(async () => {
     if (!token) return;
@@ -408,6 +465,12 @@ export default function AlertasPage() {
     setSaving(true);
     setError("");
     try {
+      let paramsFromEditor: Record<string, unknown> = {};
+      try {
+        paramsFromEditor = JSON.parse(testParamsText || "{}");
+      } catch {
+        throw new Error("JSON de prueba inválido. Corrige el bloque 'Flujo de prueba controlado' antes de guardar.");
+      }
       const payload = {
         ...form,
         role: form.role,
@@ -417,7 +480,7 @@ export default function AlertasPage() {
           serials: form.scope?.serials ?? [],
           deviceIds: form.scope?.deviceIds ?? [],
         },
-        params: form.params ?? typeConfig.defaults,
+        params: { ...(form.params ?? typeConfig.defaults), ...paramsFromEditor },
         notifications: {
           ...(form.notifications ?? notificationDefaults),
           groups: {
@@ -433,14 +496,16 @@ export default function AlertasPage() {
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data?.detail ?? "No se pudo guardar la regla");
       setEditingId(null);
-      setForm({ ...emptyRule, params: { ...alertTypeConfig.battery_low_any.defaults } });
+      const reset = { ...emptyRule, params: { ...alertTypeConfig.battery_low_any.defaults } };
+      setForm(reset);
+      setTestParamsText(JSON.stringify(reset.params ?? {}, null, 2));
       await loadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error guardando la regla");
     } finally {
       setSaving(false);
     }
-  }, [authHeaders, editingId, form, loadAll, token, typeConfig.defaults]);
+  }, [authHeaders, editingId, form, loadAll, testParamsText, token, typeConfig.defaults]);
 
   const testRule = useCallback(async (ruleId: string) => {
     if (!token) {
@@ -449,8 +514,15 @@ export default function AlertasPage() {
     }
     setTestingRuleId(ruleId);
     setError("");
+    setRunFeedback(null);
     try {
-      const resp = await fetch(`/api/alerts/rules/${ruleId}/test`, { method: "POST", headers: authHeaders });
+      let parsedParams: Record<string, unknown> = {};
+      try {
+        parsedParams = JSON.parse(testParamsText || "{}");
+      } catch {
+        throw new Error("JSON de prueba inválido. Corrige el formato antes de validar.");
+      }
+      const resp = await fetch(`/api/alerts/rules/${ruleId}/test`, { method: "POST", headers: authHeaders, body: JSON.stringify({ params: parsedParams }) });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data?.detail ?? "No se pudo validar la regla");
       setValidationResult(data?.result?.debug ?? null);
@@ -459,7 +531,7 @@ export default function AlertasPage() {
     } finally {
       setTestingRuleId(null);
     }
-  }, [authHeaders, token]);
+  }, [authHeaders, testParamsText, token]);
 
   const removeRule = useCallback(async (id: string) => {
     if (!token) return;
@@ -473,12 +545,86 @@ export default function AlertasPage() {
     await loadAll();
   }, [authHeaders, loadAll, token]);
 
+  const updateEventStatus = useCallback(async (eventId: string, action: "ack" | "resolve") => {
+    if (!token) return;
+    setError("");
+    const resp = await fetch(`/api/alerts/events/${eventId}/${action}`, { method: "POST", headers: authHeaders });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      setError(data?.detail ?? "No se pudo actualizar el evento");
+      return;
+    }
+    await loadAll();
+  }, [authHeaders, loadAll, token]);
+
+  const deleteEvent = useCallback(async (eventId: string) => {
+    if (!token) return;
+    setError("");
+    const resp = await fetch(`/api/alerts/events/${eventId}`, { method: "DELETE", headers: authHeaders });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      setError(data?.detail ?? "No se pudo borrar el evento");
+      return;
+    }
+    await loadAll();
+  }, [authHeaders, loadAll, token]);
+
+  const clearEvents = useCallback(async (onlyResolved: boolean) => {
+    if (!token) return;
+    setError("");
+    const resp = await fetch(`/api/alerts/events?onlyResolved=${onlyResolved ? "1" : "0"}`, { method: "DELETE", headers: authHeaders });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      setError(data?.detail ?? "No se pudieron limpiar eventos");
+      return;
+    }
+    await loadAll();
+  }, [authHeaders, loadAll, token]);
+
+  const runEvaluationNow = useCallback(async () => {
+    if (!token) return;
+    setRunningNow(true);
+    setError("");
+    setRunFeedback(null);
+    try {
+      const resp = await fetch("/api/alerts/run", { method: "POST", headers: authHeaders });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data?.detail ?? "No se pudo ejecutar el motor");
+      setRunFeedback({
+        evaluated: Number(data?.evaluated ?? 0),
+        fired: Number(data?.fired ?? 0),
+        ranAt: new Date().toISOString(),
+      });
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error ejecutando motor");
+    } finally {
+      setRunningNow(false);
+    }
+  }, [authHeaders, loadAll, token]);
+
+  const applyMockPreset = useCallback((mode: "trigger" | "healthy") => {
+    const preset = { ...alertTypeConfig[activeType].defaults, ...typeMockPresets[activeType][mode] };
+    setForm((prev) => ({ ...prev, params: { ...(prev.params ?? {}), ...preset } }));
+    setTestParamsText(JSON.stringify({ ...(form.params ?? {}), ...preset }, null, 2));
+  }, [activeType, form.params]);
+
   return (
     <section className="space-y-6 text-slate-100">
       <div className="rounded-2xl border border-slate-800 bg-gradient-to-r from-slate-900 to-slate-950 p-5">
         <p className="text-xs uppercase tracking-wider text-cyan-300">Alertas</p>
         <h1 className="text-2xl font-semibold">Sistema de reglas y notificaciones</h1>
-        <p className="mt-1 text-sm text-slate-300">Configura, prueba y opera alertas para equipos IoT de forma centralizada y escalable.</p>
+        <p className="mt-1 text-sm text-slate-300">Configura, prueba y opera alertas para equipos IoT de forma centralizada y escalable. Esta versión usa datos mock para batería y email en modo preview.</p>
+      </div>
+
+      <div className="rounded-2xl border border-amber-700/60 bg-amber-950/30 p-4 text-sm text-amber-100">
+        <p className="font-semibold">Estado actual del módulo</p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-200">
+          <li>Batería: evaluación con datos simulados en <code>params.mockBatteries</code>.</li>
+          <li>Email: envío en modo preview (no entrega real), webhook sí intenta ejecución.</li>
+          <li><b>Validar</b> = simulación manual, no persiste eventos.</li>
+          <li><b>Ejecutar evaluación ahora</b> = ejecución real del motor, sí puede persistir eventos.</li>
+        </ul>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -578,7 +724,30 @@ export default function AlertasPage() {
             {typeConfig.render({ params, onChange: patchParams })}
           </SectionCard>
 
-          <SectionCard title="4) Notificaciones" subtitle="Define quién recibe alertas y cómo se controla la frecuencia de envío.">
+          <SectionCard title="4) Flujo de prueba controlado" subtitle="Inyecta datos mock de forma reproducible para validar cada tipo de regla y su transición edge/level/cooldown.">
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => applyMockPreset("trigger")}>
+                  Preset dispara ({typeConfig.label})
+                </button>
+                <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => applyMockPreset("healthy")}>
+                  Preset no dispara
+                </button>
+                <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => setTestParamsText(JSON.stringify(form.params ?? {}, null, 2))}>
+                  Restaurar desde formulario
+                </button>
+              </div>
+              <textarea
+                className={`${inputClass} min-h-40 font-mono text-xs`}
+                value={testParamsText}
+                onChange={(e) => setTestParamsText(e.target.value)}
+                placeholder='{"mockValue": 120}'
+              />
+              <p className="text-xs text-slate-400">Este JSON se usa en “Validar (simulación)” sin sobrescribir la regla guardada. Para persistir eventos usa “Estado → Ejecutar evaluación ahora”.</p>
+            </div>
+          </SectionCard>
+
+          <SectionCard title="5) Notificaciones" subtitle="Define quién recibe alertas y cómo se controla la frecuencia de envío.">
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               <FieldBlock label="Destinatarios directos" help="Correos separados por comas. Recibirán la alerta siempre.">
                 <input className={inputClass} value={form.notifications?.emails?.join(", ") ?? ""} onChange={(e) => patchNotifications({ emails: csvToList(e.target.value) })} />
@@ -604,7 +773,7 @@ export default function AlertasPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="5) Resumen antes de guardar" subtitle="Verifica rápidamente el alcance y comportamiento de la alerta.">
+          <SectionCard title="6) Resumen antes de guardar" subtitle="Verifica rápidamente el alcance y comportamiento de la alerta.">
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 text-sm">
               <p><span className="text-slate-400">Alcance:</span> {scopeSummary.join(" / ") || "Sin definir"}</p>
               <p><span className="text-slate-400">Tipo:</span> {typeConfig.label}</p>
@@ -615,11 +784,14 @@ export default function AlertasPage() {
             </div>
             <div className="mt-4 flex gap-2">
               <button disabled={saving} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60" onClick={saveRule}>{saving ? "Guardando..." : editingId ? "Actualizar regla" : "Guardar regla"}</button>
-              {editingId ? <button className="rounded-lg border border-slate-700 px-4 py-2 text-sm" onClick={() => { setEditingId(null); setForm(emptyRule); }}>Cancelar edición</button> : null}
+              {editingId ? <button className="rounded-lg border border-slate-700 px-4 py-2 text-sm" onClick={() => { setEditingId(null); setForm(emptyRule); setTestParamsText(JSON.stringify(emptyRule.params ?? {}, null, 2)); }}>Cancelar edición</button> : null}
             </div>
           </SectionCard>
 
           <SectionCard title="Reglas activas" subtitle="Listado de reglas creadas con lectura rápida de estado, severidad y alcance.">
+            <p className="mb-3 rounded-lg border border-cyan-800/50 bg-cyan-950/20 px-3 py-2 text-xs text-cyan-100">
+              Usa <b>Validar (simulación)</b> para comprobar lógica sin crear eventos reales. Para crear eventos persistidos usa <b>Estado → Ejecutar evaluación ahora</b>.
+            </p>
             {rules.length === 0 ? (
               <p className="rounded-lg border border-dashed border-slate-700 p-4 text-sm text-slate-400">Todavía no hay reglas creadas para este entorno.</p>
             ) : (
@@ -635,13 +807,15 @@ export default function AlertasPage() {
                         <span className="rounded-full bg-cyan-900/60 px-2 py-1 text-cyan-200">{rule.type}</span>
                         <span className="rounded-full bg-violet-900/60 px-2 py-1 text-violet-200">{rule.scope.mode}</span>
                         <span className="rounded-full bg-amber-900/60 px-2 py-1 text-amber-200">{rule.severity}</span>
+                        {isRuleUsingMockData(rule) ? <span className="rounded-full bg-orange-900/60 px-2 py-1 text-orange-200">mock-data</span> : <span className="rounded-full bg-emerald-900/60 px-2 py-1 text-emerald-200">live-ready</span>}
+                        <span className="rounded-full bg-slate-800 px-2 py-1 text-slate-200">{rule.notifications.triggerMode} · cd {rule.notifications.cooldownMinutes}m</span>
                         <span className={`rounded-full px-2 py-1 ${rule.enabled ? "bg-emerald-900/60 text-emerald-200" : "bg-slate-800 text-slate-300"}`}>{rule.enabled ? "Activa" : "Pausada"}</span>
                       </div>
                     </div>
                     <p className="mt-2 text-xs text-slate-400">Última ejecución: {rule.lastRunAt ?? "-"} · Resultado: {rule.lastResult?.message ?? "-"}</p>
                     <div className="mt-3 flex gap-2">
-                      <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => testRule(rule.id)}>{testingRuleId === rule.id ? "Validando..." : "Validar"}</button>
-                      <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => { setEditingId(rule.id); setForm(rule); }}>Editar</button>
+                      <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => testRule(rule.id)}>{testingRuleId === rule.id ? "Validando..." : "Validar (simulación)"}</button>
+                      <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => { setEditingId(rule.id); setForm(rule); setTestParamsText(JSON.stringify(rule.params ?? {}, null, 2)); }}>Editar</button>
                       <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => removeRule(rule.id)}>Eliminar</button>
                     </div>
                   </div>
@@ -653,16 +827,30 @@ export default function AlertasPage() {
       ) : null}
 
       {tab === "events" ? (
-        events.length === 0 ? <p className="rounded-lg border border-dashed border-slate-700 p-6 text-sm text-slate-400">Sin eventos aún.</p> : (
-          <div className="space-y-2">
-            {events.map((event) => (
+        eventsForView.length === 0 ? <p className="rounded-lg border border-dashed border-slate-700 p-6 text-sm text-slate-400">Sin eventos aún.</p> : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => clearEvents(true)}>Limpiar solo resueltos</button>
+              <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => clearEvents(false)}>Borrar todos los eventos</button>
+            </div>
+            {eventsForView.map((event) => (
               <div key={event.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-medium">{event.ruleName}</p>
-                  <span className="rounded-full bg-amber-900/60 px-2 py-1 text-xs text-amber-200">{event.severity}</span>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <span className={`rounded-full px-2 py-1 ${eventStatusClass(event.status)}`}>{event.status}</span>
+                    <span className="rounded-full bg-amber-900/60 px-2 py-1 text-amber-200">{event.severity}</span>
+                    <span className="rounded-full bg-slate-800 px-2 py-1 text-slate-200">{event.scope.mode}</span>
+                  </div>
                 </div>
                 <p className="mt-1 text-sm text-slate-300">{event.message}</p>
                 <p className="text-xs text-slate-500">{event.timestamp} · {event.scope.tenant}/{event.scope.client ?? "-"}/{event.scope.site ?? "-"}</p>
+                <p className="mt-1 text-xs text-slate-400">Afectados: {event.affected.length} · Regla: {event.ruleId}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button disabled={event.status !== "active"} className="rounded-lg border border-blue-700 px-3 py-1.5 text-xs text-blue-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "ack")}>Marcar ACK</button>
+                  <button disabled={event.status === "resolved"} className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "resolve")}>Marcar resuelto</button>
+                  <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => deleteEvent(event.id)}>Eliminar</button>
+                </div>
               </div>
             ))}
           </div>
@@ -671,12 +859,27 @@ export default function AlertasPage() {
 
       {tab === "status" ? (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="rounded-xl border border-sky-800/60 bg-sky-950/20 p-4 md:col-span-2 xl:col-span-3">
+            <p className="text-sm text-sky-100"><b>Ejecución real del motor:</b> este botón llama a <code>POST /api/alerts/run</code>, evalúa reglas activas y puede persistir eventos en la pestaña Eventos.</p>
+          </div>
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4"><p className="text-sm text-slate-400">Motor</p><p className="text-xl">{status?.engineStatus ?? "-"}</p></div>
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4"><p className="text-sm text-slate-400">Última evaluación</p><p className="text-xl">{status?.lastRunAt ?? "-"}</p></div>
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4"><p className="text-sm text-slate-400">Reglas evaluadas</p><p className="text-xl">{status?.rulesEvaluated ?? 0}</p></div>
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4"><p className="text-sm text-slate-400">Tiempo medio</p><p className="text-xl">{status?.avgEvalMs ?? 0} ms</p></div>
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4"><p className="text-sm text-slate-400">Disparadas hoy</p><p className="text-xl">{status?.alertsTriggeredToday ?? 0}</p></div>
-          <button className="rounded-xl bg-blue-700 px-3 py-2" onClick={async () => { await fetch("/api/alerts/run", { method: "POST", headers: authHeaders }); await loadAll(); }}>Ejecutar evaluación ahora</button>
+          <button disabled={runningNow} className="rounded-xl bg-blue-700 px-3 py-2 disabled:opacity-60" onClick={runEvaluationNow}>
+            {runningNow ? "Ejecutando..." : "Ejecutar evaluación ahora"}
+          </button>
+          {runFeedback ? (
+            <div className="rounded-xl border border-emerald-700/60 bg-emerald-950/30 p-4 md:col-span-2 xl:col-span-3">
+              <p className="text-sm text-emerald-100">
+                Ejecución real completada ({runFeedback.ranAt}): <b>{runFeedback.evaluated}</b> regla(s) evaluada(s), <b>{runFeedback.fired}</b> disparada(s).
+              </p>
+              <button className="mt-2 rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => setTab("events")}>
+                Ver eventos generados
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
       {validationResult ? <ValidationModal result={validationResult} onClose={() => setValidationResult(null)} /> : null}

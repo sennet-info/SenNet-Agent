@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 import { NextRequest } from "next/server";
 
 import { requireAdminToken } from "@/lib/alerts-auth";
-import { listEvents } from "@/lib/alerts-store";
+import { clearEvents, listEvents } from "@/lib/alerts-store";
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,6 +24,17 @@ export async function GET(request: NextRequest) {
     });
 
     return Response.json({ items });
+  } catch (error) {
+    return Response.json({ detail: error instanceof Error ? error.message : "Error" }, { status: 401 });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    await requireAdminToken(request);
+    const onlyResolved = request.nextUrl.searchParams.get("onlyResolved") === "1";
+    const result = await clearEvents({ onlyResolved });
+    return Response.json({ ok: true, ...result });
   } catch (error) {
     return Response.json({ detail: error instanceof Error ? error.message : "Error" }, { status: 401 });
   }

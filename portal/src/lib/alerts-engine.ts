@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 
 import { notifyForEvent, previewDelivery } from "@/lib/alerts-notify";
 import { AlertEvent, AlertRule, AlertValidationDebug } from "@/lib/alerts-types";
-import { appendEvent, getState, listRules, saveRules, saveState } from "@/lib/alerts-store";
+import { appendEvent, getState, listRules, resolveActiveEventsByRule, saveRules, saveState } from "@/lib/alerts-store";
 
 type BatterySample = { deviceId: string; battery: number; serial?: string; label?: string; ts?: string };
 
@@ -15,6 +15,8 @@ type RuleEvalResult = {
   typeSpecificDebug: Record<string, unknown>;
   affected: Array<{ serial?: string; deviceId?: string; label?: string }>;
 };
+type AffectedItem = { serial?: string; deviceId?: string; label?: string };
+type EntityStateMap = Record<string, { status: "ok" | "fail"; lastChangeAt: string; meta?: AffectedItem }>;
 
 type AlertsDataAdapter = {
   getBatterySamples: (rule: AlertRule) => Promise<BatterySample[]>;
@@ -39,8 +41,19 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function fallbackAffectedFromScope(rule: AlertRule): AffectedItem[] {
+  if (rule.scope.deviceIds?.length) {
+    return rule.scope.deviceIds.map((deviceId) => ({ deviceId, label: deviceId }));
+  }
+  if (rule.scope.serials?.length) {
+    return rule.scope.serials.map((serial) => ({ serial, label: serial }));
+  }
+  return [];
+}
+
 function buildEventsFromResult(rule: AlertRule, result: RuleEvalResult): AlertEvent[] {
   if (!result.fired) return [];
+  const effectiveAffected = result.affected.length ? result.affected : fallbackAffectedFromScope(rule);
 
   if (rule.scope.mode === "grouped") {
     return [
@@ -51,7 +64,7 @@ function buildEventsFromResult(rule: AlertRule, result: RuleEvalResult): AlertEv
         ruleId: rule.id,
         ruleName: rule.name,
         scope: rule.scope,
-        affected: result.affected,
+        affected: effectiveAffected,
         message: result.message,
         details: "Condición de alerta activada",
         debug: result.typeSpecificDebug,
@@ -60,7 +73,8 @@ function buildEventsFromResult(rule: AlertRule, result: RuleEvalResult): AlertEv
     ];
   }
 
-  return result.affected.map((item) => ({
+  const perDeviceSeed: AffectedItem[] = effectiveAffected.length ? effectiveAffected : [{ label: "scope" }];
+  return perDeviceSeed.map((item) => ({
     id: randomUUID(),
     timestamp: nowIso(),
     severity: rule.severity,
@@ -77,6 +91,30 @@ function buildEventsFromResult(rule: AlertRule, result: RuleEvalResult): AlertEv
     debug: result.typeSpecificDebug,
     status: "active",
   }));
+}
+
+function getEntityKey(item: AffectedItem, idx = 0) {
+  return item.deviceId ?? item.serial ?? item.label ?? `entity-${idx}`;
+}
+
+function buildRecoveryEvent(rule: AlertRule, item: AffectedItem, sourceMessage: string): AlertEvent {
+  return {
+    id: randomUUID(),
+    timestamp: nowIso(),
+    severity: rule.severity,
+    ruleId: rule.id,
+    ruleName: rule.name,
+    scope: {
+      ...rule.scope,
+      serials: item.serial ? [item.serial] : rule.scope.serials,
+      deviceIds: item.deviceId ? [item.deviceId] : [],
+    },
+    affected: [item],
+    message: `Recuperación: ${item.label ?? item.deviceId ?? item.serial ?? "entidad"} · ${sourceMessage}`,
+    details: "Condición de alerta recuperada",
+    debug: { transition: "fail_to_ok" },
+    status: "resolved",
+  };
 }
 
 function evaluateComparison(value: number, threshold: number, operator: string) {
@@ -138,7 +176,7 @@ async function evalRule(rule: AlertRule, adapter: AlertsDataAdapter): Promise<Ru
   }
 
   if (rule.type === "irregular_interval") {
-    const expectedIntervalMinutes = Number(p.expectedIntervalMinutes ?? 5);
+    const expectedIntervalMinutes = Number(p.expectedIntervalMinutes ?? p.expectedMinutes ?? 5);
     const toleranceMinutes = Number(p.toleranceMinutes ?? 2);
     const observedGapMinutes = Number(p.mockObservedGapMinutes ?? expectedIntervalMinutes);
     const maxAllowed = expectedIntervalMinutes + toleranceMinutes;
@@ -201,23 +239,117 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
   const elapsed = Date.now() - t0;
 
   const previousOk = rule.lastResult?.ok ?? true;
-  const shouldNotifyByEdge = rule.notifications.triggerMode === "edge" ? previousOk !== !result.fired : result.fired;
-  const edgeReason = rule.notifications.triggerMode === "edge"
-    ? (shouldNotifyByEdge ? "Cambio de estado detectado" : "Sin cambio de borde respecto al estado previo")
-    : (result.fired ? "Modo level notifica mientras la condición esté activa" : "Modo level sin condición activa");
-
   const cooldownMs = rule.notifications.cooldownMinutes * 60 * 1000;
-  const elapsedSinceLastTrigger = rule.lastTriggeredAt ? Date.now() - new Date(rule.lastTriggeredAt).getTime() : cooldownMs;
-  const cooldownPass = !rule.lastTriggeredAt || elapsedSinceLastTrigger >= cooldownMs;
-  const cooldownRemaining = Math.max(0, cooldownMs - elapsedSinceLastTrigger);
+  const failureEvents = buildEventsFromResult(rule, result);
+  const rawParams = (rule.params ?? {}) as Record<string, unknown>;
+  const prevEntityKeys = Array.isArray(rawParams.__activeEntityKeys) ? (rawParams.__activeEntityKeys as string[]) : [];
+  const prevEntityMeta = (rawParams.__activeEntityMeta ?? {}) as Record<string, AffectedItem>;
+  const prevEntityLastNotifiedAt = (rawParams.__entityLastNotifiedAt ?? {}) as Record<string, string>;
+  const prevEntityState = (rawParams.__entityState ?? {}) as EntityStateMap;
 
-  const simulatedEvents = buildEventsFromResult(rule, result);
-  const wouldCreateEvents = result.fired && shouldNotifyByEdge && cooldownPass;
+  let simulatedEvents: AlertEvent[] = [];
+  let edgeReason = "";
+  let cooldownPass = true;
+  let cooldownRemaining = 0;
+  let cooldownBlocked = false;
+  let enteredFailKeys: string[] = [];
+  let recoveredKeys: string[] = [];
+  let currentEntityState: EntityStateMap = {};
+
+  if (rule.scope.mode === "grouped") {
+    const shouldNotifyByEdge = rule.notifications.triggerMode === "edge" ? previousOk !== !result.fired : result.fired;
+    edgeReason = rule.notifications.triggerMode === "edge"
+      ? (shouldNotifyByEdge ? "Cambio de estado de grupo detectado" : "Sin cambio de borde de grupo respecto al estado previo")
+      : (result.fired ? "Modo level notifica mientras la condición de grupo esté activa" : "Modo level sin condición activa");
+    const elapsedSinceLastTrigger = rule.lastTriggeredAt ? Date.now() - new Date(rule.lastTriggeredAt).getTime() : cooldownMs;
+    cooldownPass = !rule.lastTriggeredAt || elapsedSinceLastTrigger >= cooldownMs;
+    cooldownRemaining = Math.max(0, cooldownMs - elapsedSinceLastTrigger);
+
+    if (result.fired && shouldNotifyByEdge) {
+      simulatedEvents = failureEvents;
+    }
+    if (!result.fired && !previousOk && shouldNotifyByEdge) {
+      simulatedEvents = [
+        {
+          id: randomUUID(),
+          timestamp: nowIso(),
+          severity: rule.severity,
+          ruleId: rule.id,
+          ruleName: rule.name,
+          scope: rule.scope,
+          affected: fallbackAffectedFromScope(rule),
+          message: `Recuperación de grupo: ${rule.name}`,
+          details: "Condición de alerta recuperada",
+          debug: { transition: "fail_to_ok", mode: "grouped" },
+          status: "resolved",
+        },
+      ];
+    }
+    const isRecoveryEvent = simulatedEvents.some((event) => event.status === "resolved");
+    if (simulatedEvents.length && !cooldownPass && !isRecoveryEvent) {
+      cooldownBlocked = true;
+      simulatedEvents = [];
+    }
+  } else {
+    const currentMap = new Map<string, AffectedItem>();
+    for (const [idx, event] of failureEvents.entries()) {
+      const item = event.affected[0] ?? { label: `entity-${idx}` };
+      currentMap.set(getEntityKey(item, idx), item);
+    }
+    const now = nowIso();
+    const knownKeys = new Set<string>([
+      ...Object.keys(prevEntityState),
+      ...prevEntityKeys,
+      ...Array.from(currentMap.keys()),
+      ...(rule.scope.deviceIds ?? []),
+      ...(rule.scope.serials ?? []),
+    ]);
+    currentEntityState = {};
+    enteredFailKeys = [];
+    recoveredKeys = [];
+    for (const key of knownKeys) {
+      const prev = prevEntityState[key];
+      const prevStatus = prev?.status ?? "ok";
+      const currStatus: "ok" | "fail" = currentMap.has(key) ? "fail" : "ok";
+      if (prevStatus === "ok" && currStatus === "fail") enteredFailKeys.push(key);
+      if (prevStatus === "fail" && currStatus === "ok") recoveredKeys.push(key);
+      currentEntityState[key] = {
+        status: currStatus,
+        lastChangeAt: prevStatus === currStatus ? (prev?.lastChangeAt ?? now) : now,
+        meta: currentMap.get(key) ?? prev?.meta ?? prevEntityMeta[key],
+      };
+    }
+    const currentKeys = Object.entries(currentEntityState).filter(([, value]) => value.status === "fail").map(([key]) => key);
+
+    const failKeysToEmit = rule.notifications.triggerMode === "edge" ? enteredFailKeys : currentKeys;
+    const failEventsToEmit = failureEvents.filter((event, idx) => {
+      const item = event.affected[0] ?? { label: `entity-${idx}` };
+      return failKeysToEmit.includes(getEntityKey(item, idx));
+    });
+    const recoveryEventsToEmit = recoveredKeys.map((key) => buildRecoveryEvent(rule, prevEntityMeta[key] ?? { label: key }, result.message));
+    const candidateEvents = [...failEventsToEmit, ...recoveryEventsToEmit];
+
+    simulatedEvents = candidateEvents.filter((event, idx) => {
+      if (event.status === "resolved") return true;
+      const key = getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx);
+      const lastNotifiedAt = prevEntityLastNotifiedAt[key];
+      const elapsedSinceLast = lastNotifiedAt ? Date.now() - new Date(lastNotifiedAt).getTime() : cooldownMs;
+      return elapsedSinceLast >= cooldownMs;
+    });
+    cooldownBlocked = simulatedEvents.length < candidateEvents.length;
+
+    edgeReason = rule.notifications.triggerMode === "edge"
+      ? `Transiciones por entidad: fail=${enteredFailKeys.length}, recovery=${recoveredKeys.length}`
+      : `Modo level por entidad: activas=${currentKeys.length}, recovery=${recoveredKeys.length}`;
+    cooldownPass = simulatedEvents.length === candidateEvents.length;
+    cooldownRemaining = cooldownPass ? 0 : cooldownMs;
+  }
+
+  const wouldCreateEvents = simulatedEvents.length > 0;
   const wouldNotify = wouldCreateEvents;
   const suppressedBy = [
-    ...(result.fired ? [] : ["condition_false"]),
-    ...(result.fired && !shouldNotifyByEdge ? ["edge"] : []),
-    ...(result.fired && shouldNotifyByEdge && !cooldownPass ? ["cooldown"] : []),
+    ...(simulatedEvents.length ? [] : ["edge_or_condition"]),
+    ...(cooldownBlocked ? ["cooldown"] : []),
   ];
 
   const deliveryPreview = wouldNotify ? previewDelivery(rule) : undefined;
@@ -256,7 +388,7 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
     },
     edge_decision: {
       trigger_mode: rule.notifications.triggerMode,
-      should_notify_by_edge: shouldNotifyByEdge,
+      should_notify_by_edge: simulatedEvents.length > 0,
       reason: edgeReason,
     },
     cooldown_decision: {
@@ -265,12 +397,18 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
       cooldown_remaining_ms: cooldownRemaining,
       reason: cooldownPass ? "Cooldown cumplido" : "Cooldown activo",
     },
-    would_create_events: wouldCreateEvents,
+    would_create_events: simulatedEvents.length > 0,
     simulated_events: simulatedEvents,
     would_notify: wouldNotify,
     suppressed_by: suppressedBy,
     delivery_preview: deliveryPreview,
-    type_specific_debug: result.typeSpecificDebug,
+    type_specific_debug: {
+      ...result.typeSpecificDebug,
+      enteredFailKeys,
+      recoveredKeys,
+      previousEntityState: prevEntityState,
+      currentEntityState,
+    },
   };
 
   const createdEvents: AlertEvent[] = [];
@@ -288,11 +426,34 @@ export async function evaluateRule(rule: AlertRule, manual = false, adapter: Ale
       await appendEvent(enrichedEvent);
       createdEvents.push(enrichedEvent);
     }
+    const recoveryKeys = createdEvents
+      .filter((event) => event.status === "resolved")
+      .map((event, idx) => getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx));
+    if (recoveryKeys.length) {
+      await resolveActiveEventsByRule(rule.id, recoveryKeys);
+    }
   }
 
   const markNow = nowIso();
+  const entityLastNotifiedAt = { ...prevEntityLastNotifiedAt };
+  for (const [idx, event] of createdEvents.entries()) {
+    const key = getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx);
+    entityLastNotifiedAt[key] = markNow;
+  }
+  const currentEntityMap = new Map<string, AffectedItem>();
+  for (const [idx, event] of failureEvents.entries()) {
+    const item = event.affected[0] ?? { label: `entity-${idx}` };
+    currentEntityMap.set(getEntityKey(item, idx), item);
+  }
   const updatedRule: AlertRule = {
     ...rule,
+    params: {
+      ...rawParams,
+      __activeEntityKeys: Array.from(currentEntityMap.keys()),
+      __activeEntityMeta: Object.fromEntries(currentEntityMap.entries()),
+      __entityLastNotifiedAt: entityLastNotifiedAt,
+      __entityState: currentEntityState,
+    },
     lastRunAt: markNow,
     lastResult: { ok: !result.fired, message: result.message },
     lastTriggeredAt: createdEvents.length ? markNow : rule.lastTriggeredAt,

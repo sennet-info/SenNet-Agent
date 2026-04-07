@@ -65,6 +65,27 @@ export async function appendEvent(event: AlertEvent) {
   });
 }
 
+export async function deleteEvent(eventId: string) {
+  return withLock(async () => {
+    const events = await readJson<AlertEvent[]>(eventsPath, []);
+    const idx = events.findIndex((item) => item.id === eventId);
+    if (idx < 0) return null;
+    const [removed] = events.splice(idx, 1);
+    await atomicWrite(eventsPath, events);
+    return removed;
+  });
+}
+
+export async function clearEvents(options?: { onlyResolved?: boolean }) {
+  return withLock(async () => {
+    const events = await readJson<AlertEvent[]>(eventsPath, []);
+    const keep = options?.onlyResolved ? events.filter((item) => item.status !== "resolved") : [];
+    const removed = events.length - keep.length;
+    await atomicWrite(eventsPath, keep);
+    return { removed, remaining: keep.length };
+  });
+}
+
 export async function updateEvent(eventId: string, status: AlertEvent["status"]) {
   return withLock(async () => {
     const events = await readJson<AlertEvent[]>(eventsPath, []);
@@ -75,6 +96,31 @@ export async function updateEvent(eventId: string, status: AlertEvent["status"])
       return events[idx];
     }
     return null;
+  });
+}
+
+export async function resolveActiveEventsByRule(ruleId: string, entityKeys: string[]) {
+  return withLock(async () => {
+    const events = await readJson<AlertEvent[]>(eventsPath, []);
+    const keySet = new Set(entityKeys);
+    let updatedCount = 0;
+    const next = events.map((event) => {
+      if (event.ruleId !== ruleId || event.status !== "active") return event;
+      if (!keySet.size) {
+        updatedCount += 1;
+        return { ...event, status: "resolved" as const };
+      }
+      const affectedKeys = (event.affected ?? []).map((item) => item.deviceId ?? item.serial ?? item.label).filter(Boolean) as string[];
+      if (affectedKeys.some((key) => keySet.has(key))) {
+        updatedCount += 1;
+        return { ...event, status: "resolved" as const };
+      }
+      return event;
+    });
+    if (updatedCount) {
+      await atomicWrite(eventsPath, next);
+    }
+    return { updatedCount };
   });
 }
 
