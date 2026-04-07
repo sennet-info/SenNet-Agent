@@ -76,10 +76,15 @@ export async function deleteEvent(eventId: string) {
   });
 }
 
-export async function clearEvents(options?: { onlyResolved?: boolean }) {
+export async function clearEvents(options?: { onlyResolved?: boolean; status?: AlertEvent["status"] | "all" }) {
   return withLock(async () => {
     const events = await readJson<AlertEvent[]>(eventsPath, []);
-    const keep = options?.onlyResolved ? events.filter((item) => item.status !== "resolved") : [];
+    let keep: AlertEvent[] = [];
+    if (options?.status && options.status !== "all") {
+      keep = events.filter((item) => item.status !== options.status);
+    } else if (options?.onlyResolved) {
+      keep = events.filter((item) => item.status !== "resolved");
+    }
     const removed = events.length - keep.length;
     await atomicWrite(eventsPath, keep);
     return { removed, remaining: keep.length };
