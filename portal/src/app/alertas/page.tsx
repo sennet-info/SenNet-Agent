@@ -465,6 +465,12 @@ export default function AlertasPage() {
     setSaving(true);
     setError("");
     try {
+      let paramsFromEditor: Record<string, unknown> = {};
+      try {
+        paramsFromEditor = JSON.parse(testParamsText || "{}");
+      } catch {
+        throw new Error("JSON de prueba inválido. Corrige el bloque 'Flujo de prueba controlado' antes de guardar.");
+      }
       const payload = {
         ...form,
         role: form.role,
@@ -474,7 +480,7 @@ export default function AlertasPage() {
           serials: form.scope?.serials ?? [],
           deviceIds: form.scope?.deviceIds ?? [],
         },
-        params: form.params ?? typeConfig.defaults,
+        params: { ...(form.params ?? typeConfig.defaults), ...paramsFromEditor },
         notifications: {
           ...(form.notifications ?? notificationDefaults),
           groups: {
@@ -499,7 +505,7 @@ export default function AlertasPage() {
     } finally {
       setSaving(false);
     }
-  }, [authHeaders, editingId, form, loadAll, token, typeConfig.defaults]);
+  }, [authHeaders, editingId, form, loadAll, testParamsText, token, typeConfig.defaults]);
 
   const testRule = useCallback(async (ruleId: string) => {
     if (!token) {

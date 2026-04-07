@@ -63,7 +63,14 @@ export function normalizeRule(payload: Partial<AlertRule>, prev?: AlertRule): Al
   if (!payload.type || !ALERT_RULE_TYPES.includes(payload.type)) throw new Error("Tipo de regla inválido");
   if (!payload.severity || !ALERT_SEVERITIES.includes(payload.severity)) throw new Error("Severidad inválida");
   const now = new Date().toISOString();
-  const normalizedParams = normalizeParamsByType(payload.type, (payload.params ?? {}) as Record<string, unknown>);
+  const editableParams = (payload.params ?? {}) as Record<string, unknown>;
+  const internalParams = Object.fromEntries(
+    Object.entries((prev?.params ?? {}) as Record<string, unknown>).filter(([key]) => key.startsWith("__")),
+  );
+  const normalizedParams = {
+    ...normalizeParamsByType(payload.type, editableParams),
+    ...internalParams,
+  };
   if (payload.type === "missing_field" && !String(normalizedParams.field ?? "").trim()) {
     throw new Error("En missing_field el parámetro 'field' es obligatorio");
   }

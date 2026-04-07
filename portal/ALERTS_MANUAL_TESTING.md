@@ -12,6 +12,7 @@ Esta guía documenta cómo probar end-to-end el módulo de alertas del portal en
   - Botón en pestaña `Estado`.
   - Llama `POST /api/alerts/run`.
   - **Sí puede persistir eventos** en `alerts_events.json`.
+  - Mantiene estado interno por entidad entre runs (`__entityState`, `__activeEntityKeys`, `__activeEntityMeta`, `__entityLastNotifiedAt`).
 
 ## Checklist base (todas las reglas)
 
@@ -70,6 +71,7 @@ Esta guía documenta cómo probar end-to-end el módulo de alertas del portal en
 Esperado tras el fix:
 - no se pierde la recuperación del segundo dispositivo;
 - en `grouped`, solo hay recuperación cuando el grupo completo vuelve a estado sano.
+- al actualizar regla por `PUT /api/alerts/rules/{id}`, el backend preserva automáticamente estado interno `__*`.
 
 ## Trazabilidad técnica en debug
 
@@ -78,3 +80,7 @@ En la validación técnica (`result.debug.type_specific_debug`) revisar:
 - `recoveredKeys`
 - `previousEntityState`
 - `currentEntityState`
+
+Recomendación para pruebas escalonadas:
+- evita resetear o borrar la regla entre runs, para conservar memoria de transiciones;
+- si editas la regla, mantén mismos `deviceIds/serials` para comparar estado por entidad de forma coherente.
