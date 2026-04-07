@@ -14,6 +14,20 @@ Esta guía documenta cómo probar end-to-end el módulo de alertas del portal en
   - **Sí puede persistir eventos** en `alerts_events.json`.
   - Mantiene estado interno por entidad entre runs (`__entityState`, `__activeEntityKeys`, `__activeEntityMeta`, `__entityLastNotifiedAt`).
 
+## Estados de evento (UI + API)
+
+- `active`: evento abierto que requiere seguimiento operativo.
+- `ack`: evento reconocido por operador (sigue abierto técnicamente hasta que pase a `resolved`).
+- `resolved`: evento cerrado (recuperación detectada o cierre manual).
+
+En `GET /api/alerts/events` puedes filtrar por estado:
+- `?status=active`
+- `?status=resolved`
+- `?status=ack`
+- `?status=all` (histórico completo)
+
+En la UI de **Eventos**, el filtro por defecto es **Activos** y permite alternar a **Resueltos** o **Todos** para mantener histórico accesible.
+
 ## Checklist base (todas las reglas)
 
 1. Crear regla y guardar.
@@ -24,6 +38,18 @@ Esta guía documenta cómo probar end-to-end el módulo de alertas del portal en
 6. Confirmar feedback: reglas evaluadas y disparadas.
 7. Ir a `Eventos` y revisar eventos persistidos (estado, severidad, affected).
 8. Probar operación de evento: ACK, RESOLVED, DELETE.
+9. Probar filtros: Activos / Resueltos / Todos.
+10. Ejecutar limpieza segura de resueltos para dejar entorno limpio sin borrar activos.
+
+## Limpieza tras pruebas (recomendado)
+
+- Desde UI:
+  - pestaña `Eventos` → botón **Limpiar resueltos (seguro)**.
+- Desde API:
+  - `DELETE /api/alerts/events?status=resolved`
+
+Este flujo elimina solo eventos cerrados y preserva `active`/`ack`.
+Si necesitas reset total (solo mantenimiento excepcional): `DELETE /api/alerts/events?status=all`.
 
 ## Matriz rápida por tipo de regla
 

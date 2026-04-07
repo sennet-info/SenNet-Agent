@@ -9,6 +9,7 @@ export async function GET(request: NextRequest) {
   try {
     await requireAdminToken(request);
     const severity = request.nextUrl.searchParams.get("severity") ?? "";
+    const status = request.nextUrl.searchParams.get("status") ?? "";
     const text = request.nextUrl.searchParams.get("q")?.toLowerCase() ?? "";
     const ruleId = request.nextUrl.searchParams.get("ruleId") ?? "";
     const tenant = request.nextUrl.searchParams.get("tenant") ?? "";
@@ -16,6 +17,7 @@ export async function GET(request: NextRequest) {
 
     const items = (await listEvents()).filter((item) => {
       if (severity && item.severity !== severity) return false;
+      if (status && item.status !== status) return false;
       if (ruleId && item.ruleId !== ruleId) return false;
       if (tenant && item.scope.tenant !== tenant) return false;
       if (site && item.scope.site !== site) return false;
@@ -32,8 +34,10 @@ export async function GET(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     await requireAdminToken(request);
+    const status = request.nextUrl.searchParams.get("status");
     const onlyResolved = request.nextUrl.searchParams.get("onlyResolved") === "1";
-    const result = await clearEvents({ onlyResolved });
+    const allowedStatus = status === "active" || status === "resolved" || status === "ack" || status === "all" ? status : undefined;
+    const result = await clearEvents({ onlyResolved, status: allowedStatus });
     return Response.json({ ok: true, ...result });
   } catch (error) {
     return Response.json({ detail: error instanceof Error ? error.message : "Error" }, { status: 401 });

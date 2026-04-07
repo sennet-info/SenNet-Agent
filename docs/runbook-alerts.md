@@ -24,8 +24,20 @@ export TOKEN="<admin_token>"
 export PORTAL="http://127.0.0.1:3000"
 
 curl -s -H "Authorization: Bearer $TOKEN" "$PORTAL/api/alerts/rules" | jq .
-curl -s -H "Authorization: Bearer $TOKEN" "$PORTAL/api/alerts/events" | jq .
+curl -s -H "Authorization: Bearer $TOKEN" "$PORTAL/api/alerts/events?status=active" | jq .
+curl -s -H "Authorization: Bearer $TOKEN" "$PORTAL/api/alerts/events?status=resolved" | jq .
+curl -s -H "Authorization: Bearer $TOKEN" "$PORTAL/api/alerts/events?status=ack" | jq .
+curl -s -H "Authorization: Bearer $TOKEN" "$PORTAL/api/alerts/events?status=all" | jq .
 curl -s -H "Authorization: Bearer $TOKEN" "$PORTAL/api/alerts/status" | jq .
+```
+
+## Limpieza controlada de eventos
+```bash
+# Limpieza segura (recomendada en pruebas): solo cerrados
+curl -X DELETE -s -H "Authorization: Bearer $TOKEN" "$PORTAL/api/alerts/events?status=resolved" | jq .
+
+# Limpieza total (mantenimiento excepcional)
+curl -X DELETE -s -H "Authorization: Bearer $TOKEN" "$PORTAL/api/alerts/events?status=all" | jq .
 ```
 
 ## Ejecutar evaluación manual

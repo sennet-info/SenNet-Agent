@@ -331,6 +331,7 @@ function ValidationModal({ result, onClose }: { result: AlertValidationDebug; on
 }
 
 export default function AlertasPage() {
+  const [eventsStatusFilter, setEventsStatusFilter] = useState<"active" | "resolved" | "all">("active");
   const [token, setToken] = useState("");
   const [tab, setTab] = useState<"rules" | "events" | "status">("rules");
   const [rules, setRules] = useState<AlertRule[]>([]);
@@ -396,7 +397,7 @@ export default function AlertasPage() {
     try {
       const [rulesRes, eventsRes, statusRes] = await Promise.all([
         fetch("/api/alerts/rules", { headers: authHeaders, cache: "no-store" }),
-        fetch("/api/alerts/events", { headers: authHeaders, cache: "no-store" }),
+        fetch(`/api/alerts/events?status=${eventsStatusFilter}`, { headers: authHeaders, cache: "no-store" }),
         fetch("/api/alerts/status", { headers: authHeaders, cache: "no-store" }),
       ]);
       const [rulesData, eventsData, statusData] = await Promise.all([rulesRes.json(), eventsRes.json(), statusRes.json()]);
@@ -413,7 +414,7 @@ export default function AlertasPage() {
     } finally {
       setLoading(false);
     }
-  }, [authHeaders, loadTenants, token]);
+  }, [authHeaders, eventsStatusFilter, loadTenants, token]);
 
   useEffect(() => {
     loadAll();
@@ -569,10 +570,10 @@ export default function AlertasPage() {
     await loadAll();
   }, [authHeaders, loadAll, token]);
 
-  const clearEvents = useCallback(async (onlyResolved: boolean) => {
+  const clearEvents = useCallback(async (status: "resolved" | "all") => {
     if (!token) return;
     setError("");
-    const resp = await fetch(`/api/alerts/events?onlyResolved=${onlyResolved ? "1" : "0"}`, { method: "DELETE", headers: authHeaders });
+    const resp = await fetch(`/api/alerts/events?status=${status}`, { method: "DELETE", headers: authHeaders });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       setError(data?.detail ?? "No se pudieron limpiar eventos");
@@ -827,13 +828,28 @@ export default function AlertasPage() {
       ) : null}
 
       {tab === "events" ? (
-        eventsForView.length === 0 ? <p className="rounded-lg border border-dashed border-slate-700 p-6 text-sm text-slate-400">Sin eventos aún.</p> : (
-          <div className="space-y-3">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="flex flex-wrap gap-2">
-              <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => clearEvents(true)}>Limpiar solo resueltos</button>
-              <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => clearEvents(false)}>Borrar todos los eventos</button>
+              {[
+                ["active", "Activos"],
+                ["resolved", "Resueltos"],
+                ["all", "Todos"],
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  className={`rounded-lg px-3 py-1.5 text-xs ${eventsStatusFilter === key ? "bg-cyan-700 text-white" : "border border-slate-700 text-slate-300 hover:bg-slate-800"}`}
+                  onClick={() => setEventsStatusFilter(key as typeof eventsStatusFilter)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-            {eventsForView.map((event) => (
+            <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => clearEvents("resolved")}>Limpiar resueltos (seguro)</button>
+            <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => clearEvents("all")}>Borrar todos los eventos</button>
+          </div>
+          {eventsForView.length === 0 ? <p className="rounded-lg border border-dashed border-slate-700 p-6 text-sm text-slate-400">Sin eventos para el filtro seleccionado.</p> : null}
+          {eventsForView.map((event) => (
               <div key={event.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-medium">{event.ruleName}</p>
@@ -852,9 +868,8 @@ export default function AlertasPage() {
                   <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => deleteEvent(event.id)}>Eliminar</button>
                 </div>
               </div>
-            ))}
-          </div>
-        )
+          ))}
+        </div>
       ) : null}
 
       {tab === "status" ? (
