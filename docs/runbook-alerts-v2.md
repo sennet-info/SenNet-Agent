@@ -64,6 +64,13 @@
   - nominal 3.6V
   - cutoff ~3.2V
 
+## Testing controlado (mock) para voltaje
+- En `dataSource=mock`, las reglas `battery_voltage_*` aceptan `mockBatteries[].voltage` por dispositivo.
+- Ejemplo rápido:
+  - low: `3.29`
+  - critical: `3.19`
+  - ok: `3.45`
+
 ## Retención y limpieza
 - Eventos con retención automática por tiempo y cantidad:
   - `ALERTS_EVENTS_RETENTION_DAYS` (default 30)

@@ -288,40 +288,44 @@ function csvToList(input: string) {
   return input.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
-const typeMockPresets: Record<AlertRuleType, { trigger: Record<string, unknown>; healthy: Record<string, unknown> }> = {
+const typeMockPresets: Record<AlertRuleType, { low: Record<string, unknown>; critical?: Record<string, unknown>; ok: Record<string, unknown> }> = {
   battery_low_any: {
-    trigger: { mockBatteries: [{ deviceId: "bat-1", battery: 17, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 44, serial: "GW-100", label: "Batería B" }] },
-    healthy: { mockBatteries: [{ deviceId: "bat-1", battery: 60, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 74, serial: "GW-100", label: "Batería B" }] },
+    low: { mockBatteries: [{ deviceId: "bat-1", battery: 17, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 44, serial: "GW-100", label: "Batería B" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", battery: 60, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 74, serial: "GW-100", label: "Batería B" }] },
   },
   battery_voltage_low_any: {
-    trigger: { mockBatteries: [{ deviceId: "bat-1", batteryVoltage: 3.24, serial: "GW-100", label: "Batería A" }] },
-    healthy: { mockBatteries: [{ deviceId: "bat-1", batteryVoltage: 3.58, serial: "GW-100", label: "Batería A" }] },
+    low: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.29, serial: "GW-100", label: "Batería A" }] },
+    critical: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.19, serial: "GW-100", label: "Batería A" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.45, serial: "GW-100", label: "Batería A" }] },
   },
   battery_voltage_low_all: {
-    trigger: { mockBatteries: [{ deviceId: "bat-1", batteryVoltage: 3.18, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", batteryVoltage: 3.19, serial: "GW-100", label: "Batería B" }] },
-    healthy: { mockBatteries: [{ deviceId: "bat-1", batteryVoltage: 3.49, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", batteryVoltage: 3.38, serial: "GW-100", label: "Batería B" }] },
+    low: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.29, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", voltage: 3.27, serial: "GW-100", label: "Batería B" }] },
+    critical: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.19, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", voltage: 3.18, serial: "GW-100", label: "Batería B" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.49, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", voltage: 3.45, serial: "GW-100", label: "Batería B" }] },
   },
   battery_voltage_critical_any: {
-    trigger: { mockBatteries: [{ deviceId: "bat-1", batteryVoltage: 3.22, serial: "GW-100", label: "Batería A" }] },
-    healthy: { mockBatteries: [{ deviceId: "bat-1", batteryVoltage: 3.39, serial: "GW-100", label: "Batería A" }] },
+    low: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.22, serial: "GW-100", label: "Batería A" }] },
+    critical: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.19, serial: "GW-100", label: "Batería A" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.39, serial: "GW-100", label: "Batería A" }] },
   },
   battery_voltage_critical_all: {
-    trigger: { mockBatteries: [{ deviceId: "bat-1", batteryVoltage: 3.22, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", batteryVoltage: 3.23, serial: "GW-100", label: "Batería B" }] },
-    healthy: { mockBatteries: [{ deviceId: "bat-1", batteryVoltage: 3.39, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", batteryVoltage: 3.37, serial: "GW-100", label: "Batería B" }] },
+    low: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.22, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", voltage: 3.23, serial: "GW-100", label: "Batería B" }] },
+    critical: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.19, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", voltage: 3.18, serial: "GW-100", label: "Batería B" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.39, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", voltage: 3.37, serial: "GW-100", label: "Batería B" }] },
   },
   battery_low_all: {
-    trigger: { mockBatteries: [{ deviceId: "bat-1", battery: 15, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 19, serial: "GW-100", label: "Batería B" }] },
-    healthy: { mockBatteries: [{ deviceId: "bat-1", battery: 60, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 19, serial: "GW-100", label: "Batería B" }] },
+    low: { mockBatteries: [{ deviceId: "bat-1", battery: 15, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 19, serial: "GW-100", label: "Batería B" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", battery: 60, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 19, serial: "GW-100", label: "Batería B" }] },
   },
   battery_low: {
-    trigger: { mockBatteries: [{ deviceId: "bat-1", battery: 16, serial: "GW-100", label: "Batería A" }] },
-    healthy: { mockBatteries: [{ deviceId: "bat-1", battery: 65, serial: "GW-100", label: "Batería A" }] },
+    low: { mockBatteries: [{ deviceId: "bat-1", battery: 16, serial: "GW-100", label: "Batería A" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", battery: 65, serial: "GW-100", label: "Batería A" }] },
   },
-  heartbeat: { trigger: { mockLastPointMinutesAgo: 45, timeoutMinutes: 15, expectedIntervalMinutes: 5, staleMultiplier: 3 }, healthy: { mockLastPointMinutesAgo: 3, timeoutMinutes: 15, expectedIntervalMinutes: 5, staleMultiplier: 3 } },
-  threshold: { trigger: { mockValue: 120 }, healthy: { mockValue: -5 } },
-  daily_sum: { trigger: { mockValue: 180 }, healthy: { mockValue: 20 } },
-  missing_field: { trigger: { mockRows: [{ value: 12 }, { value: null }, {}] }, healthy: { mockRows: [{ value: 12 }, { value: 18 }] } },
-  irregular_interval: { trigger: { mockObservedGapMinutes: 12 }, healthy: { mockObservedGapMinutes: 5 } },
+  heartbeat: { low: { mockLastPointMinutesAgo: 45, timeoutMinutes: 15, expectedIntervalMinutes: 5, staleMultiplier: 3 }, ok: { mockLastPointMinutesAgo: 3, timeoutMinutes: 15, expectedIntervalMinutes: 5, staleMultiplier: 3 } },
+  threshold: { low: { mockValue: 120 }, ok: { mockValue: -5 } },
+  daily_sum: { low: { mockValue: 180 }, ok: { mockValue: 20 } },
+  missing_field: { low: { mockRows: [{ value: 12 }, { value: null }, {}] }, ok: { mockRows: [{ value: 12 }, { value: 18 }] } },
+  irregular_interval: { low: { mockObservedGapMinutes: 12 }, ok: { mockObservedGapMinutes: 5 } },
 };
 
 function isRuleUsingMockData(rule: AlertRule | Partial<AlertRule>) {
@@ -702,8 +706,10 @@ export default function AlertasPage() {
     }
   }, [authHeaders, loadAll, token]);
 
-  const applyMockPreset = useCallback((mode: "trigger" | "healthy") => {
-    const preset = { ...alertTypeConfig[activeType].defaults, ...typeMockPresets[activeType][mode] };
+  const applyMockPreset = useCallback((mode: "low" | "critical" | "ok") => {
+    const presetBucket = typeMockPresets[activeType];
+    const selected = mode === "critical" ? (presetBucket.critical ?? presetBucket.low) : presetBucket[mode];
+    const preset = { ...alertTypeConfig[activeType].defaults, ...selected };
     setForm((prev) => ({ ...prev, params: { ...(prev.params ?? {}), ...preset } }));
     setTestParamsText(JSON.stringify({ ...(form.params ?? {}), ...preset }, null, 2));
   }, [activeType, form.params]);
@@ -835,16 +841,24 @@ export default function AlertasPage() {
                 <p className="rounded-lg border border-cyan-800/50 bg-cyan-950/20 p-3 text-xs text-cyan-200">Esta regla usa telemetría real. El bloque JSON se mantiene para validar sin tocar producción, pero la ejecución del motor usará datos reales.</p>
               ) : null}
               <div className="flex flex-wrap gap-2">
-                <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => applyMockPreset("trigger")}>
-                  Preset dispara ({typeConfig.label})
+                <button className="rounded-lg border border-amber-700 px-3 py-1.5 text-xs text-amber-200 hover:bg-amber-900/30" onClick={() => applyMockPreset("low")}>
+                  Preset low ({typeConfig.label})
                 </button>
-                <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => applyMockPreset("healthy")}>
-                  Preset no dispara
+                {activeType.startsWith("battery_voltage_") ? (
+                  <button className="rounded-lg border border-red-700 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/30" onClick={() => applyMockPreset("critical")}>
+                    Preset critical
+                  </button>
+                ) : null}
+                <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => applyMockPreset("ok")}>
+                  Preset OK
                 </button>
                 <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => setTestParamsText(JSON.stringify(form.params ?? {}, null, 2))}>
                   Restaurar desde formulario
                 </button>
               </div>
+              {activeType.startsWith("battery_voltage_") ? (
+                <p className="text-xs text-cyan-300">Para reglas de voltaje en mock usa <code>mockBatteries[].voltage</code> por dispositivo (V). Ejemplo: 3.29, 3.19, 3.45.</p>
+              ) : null}
               <textarea
                 className={`${inputClass} min-h-40 font-mono text-xs`}
                 value={testParamsText}

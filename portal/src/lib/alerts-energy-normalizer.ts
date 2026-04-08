@@ -16,6 +16,7 @@ type RawEnergySample = {
   deviceId: string;
   battery?: number;
   batteryVoltage?: number;
+  voltage?: number;
   serial?: string;
   label?: string;
   ts?: string;
@@ -27,7 +28,8 @@ export function normalizeEnergySamples(rule: AlertRule, rawSamples: RawEnergySam
   return rawSamples
     .filter((item) => item.deviceId)
     .map((item) => {
-      const voltage = item.batteryVoltage == null ? undefined : Number(item.batteryVoltage);
+      const voltageValue = item.batteryVoltage ?? item.voltage;
+      const voltage = voltageValue == null ? undefined : Number(voltageValue);
       const directPercent = item.battery == null ? undefined : Number(item.battery);
       const estimated = (directPercent == null && voltage != null)
         ? estimateBatteryPercentage(voltage, {

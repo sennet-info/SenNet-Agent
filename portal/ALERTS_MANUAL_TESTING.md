@@ -56,6 +56,24 @@ Para reglas `battery_low*` puedes enviar:
 
 El resultado debe interpretarse como **estimado**, no como medición directa.
 
+## 5.1) Mock de voltaje por dispositivo (testing controlado)
+
+Para reglas `battery_voltage_*` en `dataSource=mock`, usa:
+
+```json
+{
+  "mockBatteries": [
+    { "deviceId": "device-1", "serial": "GW-001", "label": "Sensor A", "voltage": 3.29 },
+    { "deviceId": "device-2", "serial": "GW-002", "label": "Sensor B", "voltage": 3.45 }
+  ]
+}
+```
+
+Presets recomendados:
+- low: ~3.29V
+- critical: ~3.19V
+- ok: ~3.45V
+
 ## 6) Retención y limpieza
 
 - Retención de eventos configurable por env:

@@ -42,12 +42,14 @@ function getRuleDataSource(rule: AlertRule): AlertDataSource {
 const mockAdapter: AlertsDataAdapter = {
   async getBatterySamples(rule: AlertRule) {
     const sample = Array.isArray(rule.params.mockBatteries)
-      ? (rule.params.mockBatteries as Array<{ device?: string; deviceId?: string; battery?: number; batteryVoltage?: number; serial?: string; label?: string; ts?: string; lastSeenAt?: string }>)
+      ? (rule.params.mockBatteries as Array<{ device?: string; deviceId?: string; battery?: number; batteryVoltage?: number; voltage?: number; serial?: string; label?: string; ts?: string; lastSeenAt?: string }>)
       : [];
     return sample.map((item, idx) => ({
       deviceId: item.deviceId ?? item.device ?? `device-${idx + 1}`,
       battery: item.battery == null ? undefined : Number(item.battery),
-      batteryVoltage: item.batteryVoltage == null ? undefined : Number(item.batteryVoltage),
+      batteryVoltage: item.batteryVoltage == null
+        ? (item.voltage == null ? undefined : Number(item.voltage))
+        : Number(item.batteryVoltage),
       serial: item.serial,
       label: item.label,
       ts: item.ts,
