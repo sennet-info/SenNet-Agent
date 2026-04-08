@@ -356,6 +356,23 @@ function normalizeEventForView(event: AlertEvent) {
   };
 }
 
+function buildGroupedRecoveryMessage(event: AlertEvent, ruleType?: AlertRuleType) {
+  if (!(event.status === "resolved" && event.scope.mode === "grouped")) return event.message;
+  if (ruleType?.startsWith("battery_voltage_critical")) return "Grupo recuperado: ya no hay baterías en nivel crítico";
+  if (ruleType?.startsWith("battery_voltage_low")) return "Grupo recuperado: ya no hay baterías por debajo del umbral";
+  if (ruleType?.startsWith("battery_low")) return "Grupo recuperado: baterías nuevamente en rango";
+  if (ruleType === "heartbeat") return "Grupo recuperado: equipos reportando nuevamente";
+  if (event.message.toLowerCase().startsWith("recuperación de grupo")) return "Grupo recuperado: condición normalizada";
+  return event.message;
+}
+
+function buildAffectedLine(event: AlertEvent) {
+  if (event.status === "resolved" && event.scope.mode === "grouped") {
+    return "Grupo recuperado · Equipos actualmente en alarma: 0";
+  }
+  return `Afectados: ${event.affected.length}`;
+}
+
 function FieldBlock({ label, help, children }: { label: string; help?: string; children: React.ReactNode }) {
   return (
     <label className="space-y-1 text-sm">
@@ -457,6 +474,11 @@ export default function AlertasPage() {
   const typeConfig = alertTypeConfig[activeType];
   const params = (form.params ?? {}) as Record<string, unknown>;
   const eventsForView = useMemo(() => events.map((event) => normalizeEventForView(event)), [events]);
+  const ruleTypeById = useMemo(() => {
+    const map = new Map<string, AlertRuleType>();
+    for (const rule of rules) map.set(rule.id, rule.type);
+    return map;
+  }, [rules]);
 
   const patchScope = useCallback((patch: Partial<AlertRule["scope"]>) => {
     setForm((prev) => ({ ...prev, scope: { ...(prev.scope ?? baseScope), ...patch } }));
@@ -981,9 +1003,9 @@ export default function AlertasPage() {
                     <span className="rounded-full bg-slate-800 px-2 py-1 text-slate-200">{event.scope.mode}</span>
                   </div>
                 </div>
-                <p className="mt-1 text-sm text-slate-300">{event.message}</p>
+                <p className="mt-1 text-sm text-slate-300">{buildGroupedRecoveryMessage(event, ruleTypeById.get(event.ruleId))}</p>
                 <p className="text-xs text-slate-500">{event.timestamp} · {event.scope.tenant}/{event.scope.client ?? "-"}/{event.scope.site ?? "-"}</p>
-                <p className="mt-1 text-xs text-slate-400">Afectados: {event.affected.length} · Regla: {event.ruleId}</p>
+                <p className="mt-1 text-xs text-slate-400">{buildAffectedLine(event)} · Regla: {event.ruleId}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button disabled={event.status !== "active"} className="rounded-lg border border-blue-700 px-3 py-1.5 text-xs text-blue-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "ack")}>Marcar ACK</button>
                   <button disabled={event.status === "resolved"} className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "resolve")}>Marcar resuelto</button>

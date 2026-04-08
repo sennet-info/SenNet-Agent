@@ -80,3 +80,7 @@
 ## Notificaciones fase 1
 - Email: solo vista previa segura (no envío), se registra en `event.debug.deliveryPreview`.
 - Webhook: POST JSON con payload `{ rule, event }`, timeout corto, resultado en `event.debug.deliveryPreview`.
+
+## UX de eventos resueltos (grouped)
+- En recoveries `grouped`, la UI prioriza un mensaje de recuperación claro para operación.
+- Se evita mostrar `Afectados: 0` como texto principal; en su lugar se indica estado de grupo recuperado.

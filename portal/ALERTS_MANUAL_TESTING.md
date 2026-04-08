@@ -86,3 +86,8 @@ Presets recomendados:
 
 - **Demos / QA**: `dataSource=mock` + presets + Validar.
 - **Producción**: `dataSource=real` + ejecución por scheduler/motor + revisión de retención.
+
+## 8) Visualización de recoveries (grouped vs per_device)
+
+- En `grouped` y estado `resolved`, la UI muestra copy operacional (ej. “Grupo recuperado...”) y evita el texto confuso `Afectados: 0`.
+- En `per_device`, se mantiene el detalle por entidad afectada para seguimiento técnico.
