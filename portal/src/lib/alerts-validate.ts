@@ -9,9 +9,15 @@ function ensureNumber(value: unknown, fallback: number) {
 
 function normalizeParamsByType(type: AlertRule["type"], params: Record<string, unknown>) {
   if (type === "heartbeat") {
+    const expectedIntervalMinutes = Math.max(1, ensureNumber(params.expectedIntervalMinutes ?? params.expectedMinutes, 5));
+    const staleMultiplier = Math.max(1, ensureNumber(params.staleMultiplier ?? params.multiplier, 3));
+    const timeoutMinutes = Math.max(1, ensureNumber(params.timeoutMinutes ?? params.minutesWithoutData, expectedIntervalMinutes * staleMultiplier));
     return {
       ...params,
-      minutesWithoutData: Math.max(1, ensureNumber(params.minutesWithoutData, 15)),
+      expectedIntervalMinutes,
+      staleMultiplier,
+      timeoutMinutes,
+      minutesWithoutData: timeoutMinutes,
     };
   }
   if (type === "threshold") {
@@ -53,6 +59,31 @@ function normalizeParamsByType(type: AlertRule["type"], params: Record<string, u
       threshold: Math.min(100, Math.max(1, ensureNumber(params.threshold, 20))),
     };
   }
+  if (
+    type === "battery_voltage_low_any"
+    || type === "battery_voltage_low_all"
+    || type === "battery_voltage_critical_any"
+    || type === "battery_voltage_critical_all"
+  ) {
+    const warningVoltage = ensureNumber(params.warningVoltage ?? params.thresholdVoltage, 3.3);
+    const criticalVoltage = ensureNumber(params.criticalVoltage, 3.2);
+    const cutoffVoltage = ensureNumber(params.cutoffVoltage, 3.2);
+    return {
+      ...params,
+      warningVoltage,
+      criticalVoltage: Math.min(warningVoltage, criticalVoltage),
+      cutoffVoltage: Math.min(criticalVoltage, cutoffVoltage),
+      batteryProfile: {
+        chemistry: "li-ion",
+        nominalVoltage: ensureNumber(((params.batteryProfile as Record<string, unknown> | undefined)?.nominalVoltage), 3.6),
+        thresholds: {
+          low: warningVoltage,
+          critical: Math.min(warningVoltage, criticalVoltage),
+          cutoff: Math.min(criticalVoltage, cutoffVoltage),
+        },
+      },
+    };
+  }
   return params;
 }
 
@@ -82,6 +113,7 @@ export function normalizeRule(payload: Partial<AlertRule>, prev?: AlertRule): Al
     type: payload.type,
     severity: payload.severity,
     role: payload.role,
+    dataSource: payload.dataSource === "real" ? "real" : "mock",
     scope: {
       tenant: payload.scope.tenant,
       client: payload.scope.client,

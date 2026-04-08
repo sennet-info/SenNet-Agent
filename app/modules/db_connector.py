@@ -99,3 +99,81 @@ class DataFetcher:
          '''
         self._record_query(query, {"type": "raw", "device": device_name})
         return self.query_api.query_data_frame(query)
+
+    def get_device_energy_status(
+        self,
+        bucket,
+        client,
+        site,
+        serial=None,
+        lookback_minutes=180,
+        devices=None,
+        battery_fields=None,
+    ):
+        filter_ser = f'|> filter(fn: (r) => r["SerialNumber"] == "{serial}")' if serial and serial != "-- TODOS --" else ""
+        device_filter = ""
+        if devices:
+            device_checks = " or ".join([f'r["device"] == "{d}"' for d in devices if d])
+            if device_checks:
+                device_filter = f"|> filter(fn: (r) => {device_checks})"
+
+        battery_field_checks = battery_fields or ["battery_voltage", "battery_v", "vbat", "vbatt", "bat_v", "battery"]
+        battery_field_filter = " or ".join([f'r._field == "{f}"' for f in battery_field_checks if f])
+        if not battery_field_filter:
+            battery_field_filter = 'r._field == "battery_voltage"'
+
+        battery_query = f'''
+        from(bucket: "{bucket}") |> range(start: -{max(1, int(lookback_minutes))}m)
+        |> filter(fn: (r) => r["client"] == "{client}")
+        |> filter(fn: (r) => r["site_name"] == "{site}")
+        {filter_ser}
+        {device_filter}
+        |> filter(fn: (r) => {battery_field_filter})
+        |> keep(columns: ["_time", "_field", "_value", "device", "SerialNumber"])
+        |> group(columns: ["device", "SerialNumber", "_field"])
+        |> last()
+        '''
+
+        staleness_lookback = max(lookback_minutes * 8, 60)
+        staleness_query = f'''
+        from(bucket: "{bucket}") |> range(start: -{int(staleness_lookback)}m)
+        |> filter(fn: (r) => r["client"] == "{client}")
+        |> filter(fn: (r) => r["site_name"] == "{site}")
+        {filter_ser}
+        {device_filter}
+        |> keep(columns: ["_time", "device", "SerialNumber"])
+        |> group(columns: ["device", "SerialNumber"])
+        |> last()
+        '''
+
+        battery_rows = []
+        heartbeat_rows = []
+        try:
+            for table in self.query_api.query(battery_query):
+                for rec in table.records:
+                    battery_rows.append(
+                        {
+                            "deviceId": rec.values.get("device"),
+                            "serial": rec.values.get("SerialNumber"),
+                            "field": rec.get_field(),
+                            "voltage": rec.get_value(),
+                            "batteryAt": rec.get_time().isoformat() if rec.get_time() else None,
+                        }
+                    )
+        except Exception:
+            battery_rows = []
+
+        try:
+            for table in self.query_api.query(staleness_query):
+                for rec in table.records:
+                    heartbeat_rows.append(
+                        {
+                            "deviceId": rec.values.get("device"),
+                            "serial": rec.values.get("SerialNumber"),
+                            "lastSeenAt": rec.get_time().isoformat() if rec.get_time() else None,
+                        }
+                    )
+        except Exception:
+            heartbeat_rows = []
+
+        return {"battery_rows": battery_rows, "heartbeat_rows": heartbeat_rows}

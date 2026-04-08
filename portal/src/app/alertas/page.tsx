@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
+  ALERT_DATA_SOURCES,
   ALERT_ROLES,
   ALERT_RULE_TYPES,
   ALERT_SEVERITIES,
@@ -55,6 +56,7 @@ const emptyRule: Partial<AlertRule> = {
   enabled: true,
   type: "battery_low_any",
   severity: "warn",
+  dataSource: "mock",
   scope: baseScope,
   params: { threshold: 20 },
   scheduleMinutes: 5,
@@ -80,6 +82,76 @@ const alertTypeConfig: Record<AlertRuleType, AlertTypeConfig> = {
       </FieldBlock>
     ),
   },
+  battery_voltage_low_any: {
+    label: "Batería baja por voltaje (cualquiera)",
+    description: "Se dispara cuando al menos un dispositivo cae por debajo de umbral de voltaje real (V).",
+    defaults: { warningVoltage: 3.3, criticalVoltage: 3.2 },
+    summary: (params) => `Umbral: < ${Number(params.warningVoltage ?? 3.3).toFixed(2)} V (crítico < ${Number(params.criticalVoltage ?? 3.2).toFixed(2)} V)`,
+    render: ({ params, onChange }) => (
+      <div className="grid gap-3 md:grid-cols-2">
+        <FieldBlock label="Warning (V)">
+          <input type="number" step="0.01" className={inputClass} value={Number(params.warningVoltage ?? 3.3)} onChange={(e) => onChange("warningVoltage", Number(e.target.value))} />
+        </FieldBlock>
+        <FieldBlock label="Critical (V)">
+          <input type="number" step="0.01" className={inputClass} value={Number(params.criticalVoltage ?? 3.2)} onChange={(e) => onChange("criticalVoltage", Number(e.target.value))} />
+        </FieldBlock>
+      </div>
+    ),
+  },
+  battery_voltage_low_all: {
+    label: "Batería baja por voltaje (todos)",
+    description: "Se dispara cuando todos los dispositivos del scope están por debajo de umbral de voltaje real (V).",
+    defaults: { warningVoltage: 3.3, criticalVoltage: 3.2 },
+    summary: (params) => `Umbral: < ${Number(params.warningVoltage ?? 3.3).toFixed(2)} V (crítico < ${Number(params.criticalVoltage ?? 3.2).toFixed(2)} V)`,
+    render: ({ params, onChange }) => (
+      <div className="grid gap-3 md:grid-cols-2">
+        <FieldBlock label="Warning (V)">
+          <input type="number" step="0.01" className={inputClass} value={Number(params.warningVoltage ?? 3.3)} onChange={(e) => onChange("warningVoltage", Number(e.target.value))} />
+        </FieldBlock>
+        <FieldBlock label="Critical (V)">
+          <input type="number" step="0.01" className={inputClass} value={Number(params.criticalVoltage ?? 3.2)} onChange={(e) => onChange("criticalVoltage", Number(e.target.value))} />
+        </FieldBlock>
+      </div>
+    ),
+  },
+  battery_voltage_critical_any: {
+    label: "Batería crítica por voltaje (cualquiera)",
+    description: "Se dispara cuando cualquier equipo cae bajo el umbral crítico de voltaje real (V).",
+    defaults: { criticalVoltage: 3.25, warningVoltage: 3.35, cutoffVoltage: 3.2 },
+    summary: (params) => `Crítica: < ${Number(params.criticalVoltage ?? 3.25).toFixed(2)} V`,
+    render: ({ params, onChange }) => (
+      <div className="grid gap-3 md:grid-cols-3">
+        <FieldBlock label="Critical (V)">
+          <input type="number" step="0.01" className={inputClass} value={Number(params.criticalVoltage ?? 3.25)} onChange={(e) => onChange("criticalVoltage", Number(e.target.value))} />
+        </FieldBlock>
+        <FieldBlock label="Low (V)">
+          <input type="number" step="0.01" className={inputClass} value={Number(params.warningVoltage ?? 3.35)} onChange={(e) => onChange("warningVoltage", Number(e.target.value))} />
+        </FieldBlock>
+        <FieldBlock label="Cutoff (V)">
+          <input type="number" step="0.01" className={inputClass} value={Number(params.cutoffVoltage ?? 3.2)} onChange={(e) => onChange("cutoffVoltage", Number(e.target.value))} />
+        </FieldBlock>
+      </div>
+    ),
+  },
+  battery_voltage_critical_all: {
+    label: "Batería crítica por voltaje (todos)",
+    description: "Se dispara cuando todos los equipos del scope están bajo umbral crítico de voltaje real (V).",
+    defaults: { criticalVoltage: 3.25, warningVoltage: 3.35, cutoffVoltage: 3.2 },
+    summary: (params) => `Crítica ALL: < ${Number(params.criticalVoltage ?? 3.25).toFixed(2)} V`,
+    render: ({ params, onChange }) => (
+      <div className="grid gap-3 md:grid-cols-3">
+        <FieldBlock label="Critical (V)">
+          <input type="number" step="0.01" className={inputClass} value={Number(params.criticalVoltage ?? 3.25)} onChange={(e) => onChange("criticalVoltage", Number(e.target.value))} />
+        </FieldBlock>
+        <FieldBlock label="Low (V)">
+          <input type="number" step="0.01" className={inputClass} value={Number(params.warningVoltage ?? 3.35)} onChange={(e) => onChange("warningVoltage", Number(e.target.value))} />
+        </FieldBlock>
+        <FieldBlock label="Cutoff (V)">
+          <input type="number" step="0.01" className={inputClass} value={Number(params.cutoffVoltage ?? 3.2)} onChange={(e) => onChange("cutoffVoltage", Number(e.target.value))} />
+        </FieldBlock>
+      </div>
+    ),
+  },
   battery_low_all: {
     label: "Batería baja (todos)",
     description: "Se dispara cuando todos los dispositivos afectados están por debajo del umbral.",
@@ -101,12 +173,20 @@ const alertTypeConfig: Record<AlertRuleType, AlertTypeConfig> = {
   heartbeat: {
     label: "Heartbeat / sin señal",
     description: "Controla inactividad cuando un equipo deja de reportar en el tiempo esperado.",
-    defaults: { minutesWithoutData: 15 },
-    summary: (params) => `Minutos sin datos: ${Number(params.minutesWithoutData ?? 15)}`,
+    defaults: { expectedIntervalMinutes: 5, staleMultiplier: 3, timeoutMinutes: 15 },
+    summary: (params) => `Sin datos > ${Number(params.timeoutMinutes ?? 15)} min (esperado ${Number(params.expectedIntervalMinutes ?? 5)} min x ${Number(params.staleMultiplier ?? 3)})`,
     render: ({ params, onChange }) => (
-      <FieldBlock label="Minutos sin datos" help="Si el dispositivo no reporta durante este tiempo, se dispara la alerta.">
-        <input type="number" min={1} className={inputClass} value={Number(params.minutesWithoutData ?? 15)} onChange={(e) => onChange("minutesWithoutData", Number(e.target.value))} />
-      </FieldBlock>
+      <div className="grid gap-3 md:grid-cols-3">
+        <FieldBlock label="Intervalo esperado (min)">
+          <input type="number" min={1} className={inputClass} value={Number(params.expectedIntervalMinutes ?? 5)} onChange={(e) => onChange("expectedIntervalMinutes", Number(e.target.value))} />
+        </FieldBlock>
+        <FieldBlock label="Multiplicador stale">
+          <input type="number" min={1} className={inputClass} value={Number(params.staleMultiplier ?? 3)} onChange={(e) => onChange("staleMultiplier", Number(e.target.value))} />
+        </FieldBlock>
+        <FieldBlock label="Timeout absoluto (min)">
+          <input type="number" min={1} className={inputClass} value={Number(params.timeoutMinutes ?? 15)} onChange={(e) => onChange("timeoutMinutes", Number(e.target.value))} />
+        </FieldBlock>
+      </div>
     ),
   },
   threshold: {
@@ -208,27 +288,48 @@ function csvToList(input: string) {
   return input.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
-const typeMockPresets: Record<AlertRuleType, { trigger: Record<string, unknown>; healthy: Record<string, unknown> }> = {
+const typeMockPresets: Record<AlertRuleType, { low: Record<string, unknown>; critical?: Record<string, unknown>; ok: Record<string, unknown> }> = {
   battery_low_any: {
-    trigger: { mockBatteries: [{ deviceId: "bat-1", battery: 17, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 44, serial: "GW-100", label: "Batería B" }] },
-    healthy: { mockBatteries: [{ deviceId: "bat-1", battery: 60, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 74, serial: "GW-100", label: "Batería B" }] },
+    low: { mockBatteries: [{ deviceId: "bat-1", battery: 17, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 44, serial: "GW-100", label: "Batería B" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", battery: 60, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 74, serial: "GW-100", label: "Batería B" }] },
+  },
+  battery_voltage_low_any: {
+    low: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.29, serial: "GW-100", label: "Batería A" }] },
+    critical: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.19, serial: "GW-100", label: "Batería A" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.45, serial: "GW-100", label: "Batería A" }] },
+  },
+  battery_voltage_low_all: {
+    low: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.29, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", voltage: 3.27, serial: "GW-100", label: "Batería B" }] },
+    critical: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.19, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", voltage: 3.18, serial: "GW-100", label: "Batería B" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.49, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", voltage: 3.45, serial: "GW-100", label: "Batería B" }] },
+  },
+  battery_voltage_critical_any: {
+    low: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.22, serial: "GW-100", label: "Batería A" }] },
+    critical: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.19, serial: "GW-100", label: "Batería A" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.39, serial: "GW-100", label: "Batería A" }] },
+  },
+  battery_voltage_critical_all: {
+    low: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.22, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", voltage: 3.23, serial: "GW-100", label: "Batería B" }] },
+    critical: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.19, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", voltage: 3.18, serial: "GW-100", label: "Batería B" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", voltage: 3.39, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", voltage: 3.37, serial: "GW-100", label: "Batería B" }] },
   },
   battery_low_all: {
-    trigger: { mockBatteries: [{ deviceId: "bat-1", battery: 15, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 19, serial: "GW-100", label: "Batería B" }] },
-    healthy: { mockBatteries: [{ deviceId: "bat-1", battery: 60, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 19, serial: "GW-100", label: "Batería B" }] },
+    low: { mockBatteries: [{ deviceId: "bat-1", battery: 15, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 19, serial: "GW-100", label: "Batería B" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", battery: 60, serial: "GW-100", label: "Batería A" }, { deviceId: "bat-2", battery: 19, serial: "GW-100", label: "Batería B" }] },
   },
   battery_low: {
-    trigger: { mockBatteries: [{ deviceId: "bat-1", battery: 16, serial: "GW-100", label: "Batería A" }] },
-    healthy: { mockBatteries: [{ deviceId: "bat-1", battery: 65, serial: "GW-100", label: "Batería A" }] },
+    low: { mockBatteries: [{ deviceId: "bat-1", battery: 16, serial: "GW-100", label: "Batería A" }] },
+    ok: { mockBatteries: [{ deviceId: "bat-1", battery: 65, serial: "GW-100", label: "Batería A" }] },
   },
-  heartbeat: { trigger: { mockLastPointMinutesAgo: 45 }, healthy: { mockLastPointMinutesAgo: 3 } },
-  threshold: { trigger: { mockValue: 120 }, healthy: { mockValue: -5 } },
-  daily_sum: { trigger: { mockValue: 180 }, healthy: { mockValue: 20 } },
-  missing_field: { trigger: { mockRows: [{ value: 12 }, { value: null }, {}] }, healthy: { mockRows: [{ value: 12 }, { value: 18 }] } },
-  irregular_interval: { trigger: { mockObservedGapMinutes: 12 }, healthy: { mockObservedGapMinutes: 5 } },
+  heartbeat: { low: { mockLastPointMinutesAgo: 45, timeoutMinutes: 15, expectedIntervalMinutes: 5, staleMultiplier: 3 }, ok: { mockLastPointMinutesAgo: 3, timeoutMinutes: 15, expectedIntervalMinutes: 5, staleMultiplier: 3 } },
+  threshold: { low: { mockValue: 120 }, ok: { mockValue: -5 } },
+  daily_sum: { low: { mockValue: 180 }, ok: { mockValue: 20 } },
+  missing_field: { low: { mockRows: [{ value: 12 }, { value: null }, {}] }, ok: { mockRows: [{ value: 12 }, { value: 18 }] } },
+  irregular_interval: { low: { mockObservedGapMinutes: 12 }, ok: { mockObservedGapMinutes: 5 } },
 };
 
 function isRuleUsingMockData(rule: AlertRule | Partial<AlertRule>) {
+  if ((rule.dataSource ?? "mock") === "mock") return true;
   const params = (rule.params ?? {}) as Record<string, unknown>;
   return Object.keys(params).some((key) => key.startsWith("mock"));
 }
@@ -253,6 +354,23 @@ function normalizeEventForView(event: AlertEvent) {
       mode: event.scope?.mode ?? "grouped",
     },
   };
+}
+
+function buildGroupedRecoveryMessage(event: AlertEvent, ruleType?: AlertRuleType) {
+  if (!(event.status === "resolved" && event.scope.mode === "grouped")) return event.message;
+  if (ruleType?.startsWith("battery_voltage_critical")) return "Grupo recuperado: ya no hay baterías en nivel crítico";
+  if (ruleType?.startsWith("battery_voltage_low")) return "Grupo recuperado: ya no hay baterías por debajo del umbral";
+  if (ruleType?.startsWith("battery_low")) return "Grupo recuperado: baterías nuevamente en rango";
+  if (ruleType === "heartbeat") return "Grupo recuperado: equipos reportando nuevamente";
+  if (event.message.toLowerCase().startsWith("recuperación de grupo")) return "Grupo recuperado: condición normalizada";
+  return event.message;
+}
+
+function buildAffectedLine(event: AlertEvent) {
+  if (event.status === "resolved" && event.scope.mode === "grouped") {
+    return "Grupo recuperado · Equipos actualmente en alarma: 0";
+  }
+  return `Afectados: ${event.affected.length}`;
 }
 
 function FieldBlock({ label, help, children }: { label: string; help?: string; children: React.ReactNode }) {
@@ -293,6 +411,7 @@ function ValidationModal({ result, onClose }: { result: AlertValidationDebug; on
               <li><b>Regla:</b> {result.rule_snapshot.name}</li>
               <li><b>Tipo:</b> {result.rule_snapshot.type}</li>
               <li><b>Severidad:</b> {result.rule_snapshot.severity}</li>
+              <li><b>Fuente datos:</b> {result.rule_snapshot.dataSource ?? "mock"}</li>
               <li><b>Scope:</b> {result.scope_resolved.tenant} / {result.scope_resolved.client ?? "-"} / {result.scope_resolved.site ?? "-"}</li>
               <li><b>Modo:</b> {result.scope_resolved.mode}</li>
               <li><b>Inicio:</b> {result.evaluation_started_at}</li>
@@ -355,6 +474,11 @@ export default function AlertasPage() {
   const typeConfig = alertTypeConfig[activeType];
   const params = (form.params ?? {}) as Record<string, unknown>;
   const eventsForView = useMemo(() => events.map((event) => normalizeEventForView(event)), [events]);
+  const ruleTypeById = useMemo(() => {
+    const map = new Map<string, AlertRuleType>();
+    for (const rule of rules) map.set(rule.id, rule.type);
+    return map;
+  }, [rules]);
 
   const patchScope = useCallback((patch: Partial<AlertRule["scope"]>) => {
     setForm((prev) => ({ ...prev, scope: { ...(prev.scope ?? baseScope), ...patch } }));
@@ -604,8 +728,10 @@ export default function AlertasPage() {
     }
   }, [authHeaders, loadAll, token]);
 
-  const applyMockPreset = useCallback((mode: "trigger" | "healthy") => {
-    const preset = { ...alertTypeConfig[activeType].defaults, ...typeMockPresets[activeType][mode] };
+  const applyMockPreset = useCallback((mode: "low" | "critical" | "ok") => {
+    const presetBucket = typeMockPresets[activeType];
+    const selected = mode === "critical" ? (presetBucket.critical ?? presetBucket.low) : presetBucket[mode];
+    const preset = { ...alertTypeConfig[activeType].defaults, ...selected };
     setForm((prev) => ({ ...prev, params: { ...(prev.params ?? {}), ...preset } }));
     setTestParamsText(JSON.stringify({ ...(form.params ?? {}), ...preset }, null, 2));
   }, [activeType, form.params]);
@@ -615,13 +741,14 @@ export default function AlertasPage() {
       <div className="rounded-2xl border border-slate-800 bg-gradient-to-r from-slate-900 to-slate-950 p-5">
         <p className="text-xs uppercase tracking-wider text-cyan-300">Alertas</p>
         <h1 className="text-2xl font-semibold">Sistema de reglas y notificaciones</h1>
-        <p className="mt-1 text-sm text-slate-300">Configura, prueba y opera alertas para equipos IoT de forma centralizada y escalable. Esta versión usa datos mock para batería y email en modo preview.</p>
+        <p className="mt-1 text-sm text-slate-300">Configura, prueba y opera alertas para equipos IoT de forma centralizada y escalable. Soporta modo mock y modo real para datos energéticos.</p>
       </div>
 
       <div className="rounded-2xl border border-amber-700/60 bg-amber-950/30 p-4 text-sm text-amber-100">
         <p className="font-semibold">Estado actual del módulo</p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-200">
-          <li>Batería: evaluación con datos simulados en <code>params.mockBatteries</code>.</li>
+          <li>Fuente de datos configurable por regla: <code>mock</code> o <code>real</code>.</li>
+          <li>Batería por voltaje (V) y porcentaje estimado (si aplica curva).</li>
           <li>Email: envío en modo preview (no entrega real), webhook sí intenta ejecución.</li>
           <li><b>Validar</b> = simulación manual, no persiste eventos.</li>
           <li><b>Ejecutar evaluación ahora</b> = ejecución real del motor, sí puede persistir eventos.</li>
@@ -669,6 +796,11 @@ export default function AlertasPage() {
               </FieldBlock>
               <FieldBlock label="Cadencia de evaluación (min)">
                 <input type="number" min={1} className={inputClass} value={Number(form.scheduleMinutes ?? 5)} onChange={(e) => setForm((p) => ({ ...p, scheduleMinutes: Number(e.target.value) }))} />
+              </FieldBlock>
+              <FieldBlock label="Fuente de datos">
+                <select className={inputClass} value={form.dataSource ?? "mock"} onChange={(e) => setForm((p) => ({ ...p, dataSource: e.target.value as AlertRule["dataSource"] }))}>
+                  {ALERT_DATA_SOURCES.map((source) => <option key={source} value={source}>{source === "mock" ? "Mock (simulación)" : "Real (telemetría)"}</option>)}
+                </select>
               </FieldBlock>
             </div>
           </SectionCard>
@@ -725,26 +857,37 @@ export default function AlertasPage() {
             {typeConfig.render({ params, onChange: patchParams })}
           </SectionCard>
 
-          <SectionCard title="4) Flujo de prueba controlado" subtitle="Inyecta datos mock de forma reproducible para validar cada tipo de regla y su transición edge/level/cooldown.">
+          <SectionCard title="4) Flujo de prueba controlado" subtitle="En modo mock puedes inyectar datos para validar edge/level/cooldown de forma reproducible.">
             <div className="space-y-3">
+              {form.dataSource === "real" ? (
+                <p className="rounded-lg border border-cyan-800/50 bg-cyan-950/20 p-3 text-xs text-cyan-200">Esta regla usa telemetría real. El bloque JSON se mantiene para validar sin tocar producción, pero la ejecución del motor usará datos reales.</p>
+              ) : null}
               <div className="flex flex-wrap gap-2">
-                <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => applyMockPreset("trigger")}>
-                  Preset dispara ({typeConfig.label})
+                <button className="rounded-lg border border-amber-700 px-3 py-1.5 text-xs text-amber-200 hover:bg-amber-900/30" onClick={() => applyMockPreset("low")}>
+                  Preset low ({typeConfig.label})
                 </button>
-                <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => applyMockPreset("healthy")}>
-                  Preset no dispara
+                {activeType.startsWith("battery_voltage_") ? (
+                  <button className="rounded-lg border border-red-700 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/30" onClick={() => applyMockPreset("critical")}>
+                    Preset critical
+                  </button>
+                ) : null}
+                <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => applyMockPreset("ok")}>
+                  Preset OK
                 </button>
                 <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => setTestParamsText(JSON.stringify(form.params ?? {}, null, 2))}>
                   Restaurar desde formulario
                 </button>
               </div>
+              {activeType.startsWith("battery_voltage_") ? (
+                <p className="text-xs text-cyan-300">Para reglas de voltaje en mock usa <code>mockBatteries[].voltage</code> por dispositivo (V). Ejemplo: 3.29, 3.19, 3.45.</p>
+              ) : null}
               <textarea
                 className={`${inputClass} min-h-40 font-mono text-xs`}
                 value={testParamsText}
                 onChange={(e) => setTestParamsText(e.target.value)}
                 placeholder='{"mockValue": 120}'
               />
-              <p className="text-xs text-slate-400">Este JSON se usa en “Validar (simulación)” sin sobrescribir la regla guardada. Para persistir eventos usa “Estado → Ejecutar evaluación ahora”.</p>
+              <p className="text-xs text-slate-400">Este JSON se usa en “Validar (simulación)” sin sobrescribir la regla guardada. Para persistir eventos usa “Estado → Ejecutar evaluación ahora”. Si la regla está en modo real, este JSON solo afecta la simulación manual.</p>
             </div>
           </SectionCard>
 
@@ -780,6 +923,7 @@ export default function AlertasPage() {
               <p><span className="text-slate-400">Tipo:</span> {typeConfig.label}</p>
               <p><span className="text-slate-400">Severidad:</span> {form.severity ?? "warn"}</p>
               <p><span className="text-slate-400">Modo:</span> {form.scope?.mode ?? "grouped"}</p>
+              <p><span className="text-slate-400">Fuente:</span> {form.dataSource ?? "mock"}</p>
               <p><span className="text-slate-400">Parámetro principal:</span> {typeConfig.summary(params)}</p>
               <p><span className="text-slate-400">Destinatarios:</span> {(form.notifications?.emails?.length ?? 0) + (form.notifications?.groups?.client?.length ?? 0) + (form.notifications?.groups?.maintenance?.length ?? 0)} contactos</p>
             </div>
@@ -808,7 +952,7 @@ export default function AlertasPage() {
                         <span className="rounded-full bg-cyan-900/60 px-2 py-1 text-cyan-200">{rule.type}</span>
                         <span className="rounded-full bg-violet-900/60 px-2 py-1 text-violet-200">{rule.scope.mode}</span>
                         <span className="rounded-full bg-amber-900/60 px-2 py-1 text-amber-200">{rule.severity}</span>
-                        {isRuleUsingMockData(rule) ? <span className="rounded-full bg-orange-900/60 px-2 py-1 text-orange-200">mock-data</span> : <span className="rounded-full bg-emerald-900/60 px-2 py-1 text-emerald-200">live-ready</span>}
+                        {isRuleUsingMockData(rule) ? <span className="rounded-full bg-orange-900/60 px-2 py-1 text-orange-200">mock-data</span> : <span className="rounded-full bg-emerald-900/60 px-2 py-1 text-emerald-200">real-data</span>}
                         <span className="rounded-full bg-slate-800 px-2 py-1 text-slate-200">{rule.notifications.triggerMode} · cd {rule.notifications.cooldownMinutes}m</span>
                         <span className={`rounded-full px-2 py-1 ${rule.enabled ? "bg-emerald-900/60 text-emerald-200" : "bg-slate-800 text-slate-300"}`}>{rule.enabled ? "Activa" : "Pausada"}</span>
                       </div>
@@ -859,9 +1003,9 @@ export default function AlertasPage() {
                     <span className="rounded-full bg-slate-800 px-2 py-1 text-slate-200">{event.scope.mode}</span>
                   </div>
                 </div>
-                <p className="mt-1 text-sm text-slate-300">{event.message}</p>
+                <p className="mt-1 text-sm text-slate-300">{buildGroupedRecoveryMessage(event, ruleTypeById.get(event.ruleId))}</p>
                 <p className="text-xs text-slate-500">{event.timestamp} · {event.scope.tenant}/{event.scope.client ?? "-"}/{event.scope.site ?? "-"}</p>
-                <p className="mt-1 text-xs text-slate-400">Afectados: {event.affected.length} · Regla: {event.ruleId}</p>
+                <p className="mt-1 text-xs text-slate-400">{buildAffectedLine(event)} · Regla: {event.ruleId}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button disabled={event.status !== "active"} className="rounded-lg border border-blue-700 px-3 py-1.5 text-xs text-blue-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "ack")}>Marcar ACK</button>
                   <button disabled={event.status === "resolved"} className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "resolve")}>Marcar resuelto</button>

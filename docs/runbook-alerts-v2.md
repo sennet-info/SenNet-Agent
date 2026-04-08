@@ -13,6 +13,9 @@
 
 ## Crear regla v2
 1. Definir nombre, tipo y severidad.
+2. Definir **dataSource**:
+   - `mock`: usa `params.mock*` (validaciones/demos).
+   - `real`: usa telemetría real del backend.
 2. Elegir modo de regla:
    - `per_device`: genera evento por cada device afectado.
    - `grouped`: genera 1 evento con lista `affected[]`.
@@ -43,7 +46,41 @@
 - Regla `battery_low_all`:
   - `grouped`: dispara solo si los 10 están bajo umbral; 1 evento.
   - `per_device`: si se cumple condición global, genera evento por cada equipo.
+- Regla `battery_voltage_low_any` (recomendada para producción):
+  - umbral low/critical en voltios (ej. 3.35V / 3.25V).
+  - diferencia explícita entre batería baja por voltaje y heartbeat sin datos.
+- Regla `battery_voltage_critical_any`:
+  - exclusiva para condición crítica (caída fuerte de batería).
+  - mensaje operacional directo: “Batería crítica: X.XX V”.
+
+## Perfil de batería (configurable)
+- Cada regla de voltaje puede incluir `batteryProfile`:
+  - `chemistry`
+  - `nominalVoltage`
+  - `thresholds.low`
+  - `thresholds.critical`
+  - `thresholds.cutoff`
+- Perfil inicial recomendado BeaglePlay:
+  - nominal 3.6V
+  - cutoff ~3.2V
+
+## Testing controlado (mock) para voltaje
+- En `dataSource=mock`, las reglas `battery_voltage_*` aceptan `mockBatteries[].voltage` por dispositivo.
+- Ejemplo rápido:
+  - low: `3.29`
+  - critical: `3.19`
+  - ok: `3.45`
+
+## Retención y limpieza
+- Eventos con retención automática por tiempo y cantidad:
+  - `ALERTS_EVENTS_RETENTION_DAYS` (default 30)
+  - `ALERTS_EVENTS_MAX` (default 2000)
+- El estado interno de entidades se poda para evitar crecimiento indefinido.
 
 ## Notificaciones fase 1
 - Email: solo vista previa segura (no envío), se registra en `event.debug.deliveryPreview`.
 - Webhook: POST JSON con payload `{ rule, event }`, timeout corto, resultado en `event.debug.deliveryPreview`.
+
+## UX de eventos resueltos (grouped)
+- En recoveries `grouped`, la UI prioriza un mensaje de recuperación claro para operación.
+- Se evita mostrar `Afectados: 0` como texto principal; en su lugar se indica estado de grupo recuperado.

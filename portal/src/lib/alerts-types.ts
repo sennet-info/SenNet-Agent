@@ -1,5 +1,20 @@
-export const ALERT_RULE_TYPES = ["heartbeat", "threshold", "missing_field", "irregular_interval", "daily_sum", "battery_low", "battery_low_any", "battery_low_all"] as const;
+export const ALERT_RULE_TYPES = [
+  "heartbeat",
+  "threshold",
+  "missing_field",
+  "irregular_interval",
+  "daily_sum",
+  "battery_low",
+  "battery_low_any",
+  "battery_low_all",
+  "battery_voltage_low_any",
+  "battery_voltage_low_all",
+  "battery_voltage_critical_any",
+  "battery_voltage_critical_all",
+] as const;
 export type AlertRuleType = (typeof ALERT_RULE_TYPES)[number];
+export const ALERT_DATA_SOURCES = ["mock", "real"] as const;
+export type AlertDataSource = (typeof ALERT_DATA_SOURCES)[number];
 
 export const ALERT_SEVERITIES = ["info", "warn", "critical"] as const;
 export type AlertSeverity = (typeof ALERT_SEVERITIES)[number];
@@ -29,6 +44,7 @@ export type AlertRule = {
   type: AlertRuleType;
   severity: AlertSeverity;
   role?: AlertRole;
+  dataSource?: AlertDataSource;
   scope: AlertScope;
   params: Record<string, unknown>;
   scheduleMinutes: number;
@@ -50,7 +66,7 @@ export type AlertRule = {
 
 
 export type AlertValidationDebug = {
-  rule_snapshot: Pick<AlertRule, "id" | "name" | "type" | "severity" | "scope" | "notifications">;
+  rule_snapshot: Pick<AlertRule, "id" | "name" | "type" | "severity" | "scope" | "notifications" | "dataSource">;
   evaluation_started_at: string;
   evaluation_elapsed_ms: number;
   scope_resolved: {
