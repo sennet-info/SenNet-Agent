@@ -8,6 +8,8 @@ const rulesPath = path.join(dataDir, "alerts_rules.json");
 const eventsPath = path.join(dataDir, "alerts_events.json");
 const statePath = path.join(dataDir, "alerts_state.json");
 const lockPath = path.join(dataDir, ".alerts.lock");
+const retentionDays = Number(process.env.ALERTS_EVENTS_RETENTION_DAYS ?? 30);
+const maxEvents = Number(process.env.ALERTS_EVENTS_MAX ?? 2000);
 
 async function withLock<T>(fn: () => Promise<T>): Promise<T> {
   await fs.mkdir(dataDir, { recursive: true });
@@ -56,11 +58,35 @@ export async function listEvents() {
   return readJson<AlertEvent[]>(eventsPath, []);
 }
 
+function applyRetention(events: AlertEvent[]) {
+  const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  const active = events.filter((item) => item.status === "active");
+  const retainedInactive = events.filter((item) => {
+    if (item.status === "active") return false;
+    const ts = new Date(item.timestamp).getTime();
+    return Number.isFinite(ts) && ts >= cutoff;
+  });
+  return [...active, ...retainedInactive]
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, maxEvents);
+}
+
+export async function cleanupEventsWithRetention() {
+  return withLock(async () => {
+    const events = await readJson<AlertEvent[]>(eventsPath, []);
+    const retained = applyRetention(events);
+    if (retained.length !== events.length) {
+      await atomicWrite(eventsPath, retained);
+    }
+    return { before: events.length, after: retained.length };
+  });
+}
+
 export async function appendEvent(event: AlertEvent) {
   return withLock(async () => {
     const events = await readJson<AlertEvent[]>(eventsPath, []);
     events.unshift(event);
-    await atomicWrite(eventsPath, events.slice(0, 2000));
+    await atomicWrite(eventsPath, applyRetention(events));
     return event;
   });
 }
@@ -97,7 +123,7 @@ export async function updateEvent(eventId: string, status: AlertEvent["status"])
     const idx = events.findIndex((item) => item.id === eventId);
     if (idx >= 0) {
       events[idx] = { ...events[idx], status };
-      await atomicWrite(eventsPath, events);
+      await atomicWrite(eventsPath, applyRetention(events));
       return events[idx];
     }
     return null;
@@ -123,7 +149,7 @@ export async function resolveActiveEventsByRule(ruleId: string, entityKeys: stri
       return event;
     });
     if (updatedCount) {
-      await atomicWrite(eventsPath, next);
+      await atomicWrite(eventsPath, applyRetention(next));
     }
     return { updatedCount };
   });

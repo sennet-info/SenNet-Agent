@@ -1,112 +1,70 @@
-# Alertas — Guía de validación manual reproducible
+# Alertas — Guía de validación manual (mock + real)
 
-Esta guía documenta cómo probar end-to-end el módulo de alertas del portal en modo **mock/testable**.
+## 1) Conceptos clave
 
-## Qué es simulación vs ejecución real
+- **dataSource=mock**: usa `params.mock*` para pruebas/demos controladas.
+- **dataSource=real**: usa telemetría real desde backend (`/v1/alerts/device-energy-status`).
+- **Batería por voltaje** (`battery_voltage_low_*`, `battery_voltage_critical_*`): compara voltaje real en **V**.
+- **Batería por porcentaje** (`battery_low*`): puede usar porcentaje directo (mock) o **% estimado** desde voltaje con curva configurable.
+- **Sin datos / heartbeat** (`heartbeat`): alerta distinta, no equivale a batería baja.
+
+## 2) Simulación vs ejecución real
 
 - **Validar (simulación)**
   - Botón en `Reglas activas`.
-  - Usa el JSON del bloque `Flujo de prueba controlado`.
-  - **No persiste eventos** en `alerts_events.json`.
+  - Usa JSON del bloque “Flujo de prueba controlado”.
+  - No persiste eventos.
 - **Ejecutar evaluación ahora**
-  - Botón en pestaña `Estado`.
-  - Llama `POST /api/alerts/run`.
-  - **Sí puede persistir eventos** en `alerts_events.json`.
-  - Mantiene estado interno por entidad entre runs (`__entityState`, `__activeEntityKeys`, `__activeEntityMeta`, `__entityLastNotifiedAt`).
+  - Pestaña `Estado`.
+  - Ejecuta motor real (`POST /api/alerts/run`) y puede persistir eventos.
 
-## Estados de evento (UI + API)
+## 3) Pruebas recomendadas (mock)
 
-- `active`: evento abierto que requiere seguimiento operativo.
-- `ack`: evento reconocido por operador (sigue abierto técnicamente hasta que pase a `resolved`).
-- `resolved`: evento cerrado (recuperación detectada o cierre manual).
+1. Crear regla con `dataSource=mock`.
+2. Aplicar preset “dispara” y validar.
+3. Confirmar en modal: `fired=true`, mensaje y `simulated_events`.
+4. Aplicar preset “no dispara” y validar.
+5. Ejecutar evaluación real y revisar eventos persistidos.
 
-En `GET /api/alerts/events` puedes filtrar por estado:
-- `?status=active`
-- `?status=resolved`
-- `?status=ack`
-- `?status=all` (histórico completo)
+## 4) Pruebas recomendadas (real)
 
-En la UI de **Eventos**, el filtro por defecto es **Activos** y permite alternar a **Resueltos** o **Todos** para mantener histórico accesible.
+1. Crear regla con `dataSource=real` y scope completo (`tenant/client/site`).
+2. Para voltaje:
+   - tipo `battery_voltage_low_any` y `battery_voltage_critical_any`
+   - perfil recomendado inicial: nominal `3.6V`, `low=3.35`, `critical=3.25`, `cutoff=3.2`
+3. Ejecutar evaluación real y verificar mensajes tipo:
+   - `Batería baja: 3.24 V (umbral 3.30 V)`
+   - `Batería crítica: 3.19 V`
+4. Crear/validar regla `heartbeat` con `expectedIntervalMinutes`, `staleMultiplier` y/o `timeoutMinutes` y confirmar mensajes:
+   - `Equipo sin datos desde hace X min`
 
-## Checklist base (todas las reglas)
+## 5) Curva voltaje -> porcentaje (estimado)
 
-1. Crear regla y guardar.
-2. Cargar preset **dispara** y ejecutar `Validar (simulación)`.
-3. Confirmar en modal: `fired=true`, mensaje y `simulated_events` coherentes.
-4. Cargar preset **no dispara** y repetir validación.
-5. Ir a `Estado` y pulsar `Ejecutar evaluación ahora`.
-6. Confirmar feedback: reglas evaluadas y disparadas.
-7. Ir a `Eventos` y revisar eventos persistidos (estado, severidad, affected).
-8. Probar operación de evento: ACK, RESOLVED, DELETE.
-9. Probar filtros: Activos / Resueltos / Todos.
-10. Ejecutar limpieza segura de resueltos para dejar entorno limpio sin borrar activos.
+Para reglas `battery_low*` puedes enviar:
 
-## Limpieza tras pruebas (recomendado)
+```json
+{
+  "threshold": 25,
+  "batteryCurveName": "li-ion-custom",
+  "batteryCurvePoints": [
+    {"voltage": 3.2, "percent": 0},
+    {"voltage": 3.6, "percent": 60},
+    {"voltage": 4.0, "percent": 100}
+  ]
+}
+```
 
-- Desde UI:
-  - pestaña `Eventos` → botón **Limpiar resueltos (seguro)**.
-- Desde API:
-  - `DELETE /api/alerts/events?status=resolved`
+El resultado debe interpretarse como **estimado**, no como medición directa.
 
-Este flujo elimina solo eventos cerrados y preserva `active`/`ack`.
-Si necesitas reset total (solo mantenimiento excepcional): `DELETE /api/alerts/events?status=all`.
+## 6) Retención y limpieza
 
-## Matriz rápida por tipo de regla
+- Retención de eventos configurable por env:
+  - `ALERTS_EVENTS_RETENTION_DAYS` (default 30)
+  - `ALERTS_EVENTS_MAX` (default 2000)
+- Se preservan eventos activos y se limpian automáticamente resueltos/ack antiguos.
+- El estado interno por entidad (`__entityState`, `__entityLastNotifiedAt`) también se poda para evitar crecimiento infinito.
 
-- `heartbeat`
-  - dispara: `mockLastPointMinutesAgo` > `minutesWithoutData`
-  - no dispara: `mockLastPointMinutesAgo` <= `minutesWithoutData`
-- `threshold`
-  - validar operadores (`gt`, `gte`, `lt`, `lte`, `eq`) con `mockValue`.
-- `missing_field`
-  - dispara cuando algún row en `mockRows` no trae el `field`.
-- `irregular_interval`
-  - dispara cuando `mockObservedGapMinutes` > `expectedMinutes + toleranceMinutes`.
-- `daily_sum`
-  - compara `mockValue` vs `target` con el operador configurado.
-- `battery_low`, `battery_low_any`, `battery_low_all`
-  - usan `mockBatteries`, validar umbral y diferencia `ANY` vs `ALL`.
-  - en `per_device`, verificar transición por equipo: FAIL->OK debe generar recuperación individual.
+## 7) Flujo recomendado
 
-## Estado funcional actual
-
-- Funcional y operativo: creación/edición/borrado de reglas, validación simulada, ejecución real del motor, persistencia de eventos y acciones ACK/RESOLVED/DELETE.
-- Base aún mock/MVP:
-  - baterías evaluadas desde `params.mockBatteries`.
-  - email en preview (sin entrega real).
-  - webhook sí se intenta ejecutar.
-
-## Semántica de recuperación automática
-
-- `per_device`
-  - transición independiente por entidad (`deviceId`/`serial`).
-  - emite recuperación automática por cada entidad que pasa de FAIL a OK.
-- `grouped`
-  - transición global de la regla.
-  - solo emite recuperación cuando el grupo completo vuelve a OK.
-
-## Caso reproducible A/B (fallo y recuperación escalonada)
-
-1. Configurar una regla `battery_low_any` con dos dispositivos (`A`, `B`) en `per_device`.
-2. Run #1: ambos en OK (`A=70`, `B=75`) => sin evento.
-3. Run #2: `A` en fallo (`A=10`, `B=75`) => evento fallo de `A`.
-4. Run #3: `A` y `B` en fallo (`A=10`, `B=12`) => evento fallo de `B`.
-5. Run #4: `A` recupera (`A=70`, `B=12`) => evento recuperación de `A`.
-6. Run #5: `B` recupera (`A=70`, `B=75`) => evento recuperación de `B`.
-
-Esperado tras el fix:
-- no se pierde la recuperación del segundo dispositivo;
-- en `grouped`, solo hay recuperación cuando el grupo completo vuelve a estado sano.
-- al actualizar regla por `PUT /api/alerts/rules/{id}`, el backend preserva automáticamente estado interno `__*`.
-
-## Trazabilidad técnica en debug
-
-En la validación técnica (`result.debug.type_specific_debug`) revisar:
-- `enteredFailKeys`
-- `recoveredKeys`
-- `previousEntityState`
-- `currentEntityState`
-
-Recomendación para pruebas escalonadas:
-- evita resetear o borrar la regla entre runs, para conservar memoria de transiciones;
-- si editas la regla, mantén mismos `deviceIds/serials` para comparar estado por entidad de forma coherente.
+- **Demos / QA**: `dataSource=mock` + presets + Validar.
+- **Producción**: `dataSource=real` + ejecución por scheduler/motor + revisión de retención.

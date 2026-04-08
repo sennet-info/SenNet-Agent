@@ -26,3 +26,16 @@ def list_serials(auth_config, client, site):
 def list_devices(auth_config, client, site, serial=None):
     fetcher = _get_data_fetcher(auth_config["url"], auth_config["token"], auth_config["org"])
     return fetcher.get_devices(auth_config["bucket"], client, site, serial=serial)
+
+
+def get_device_energy_status(auth_config, client, site, serial=None, lookback_minutes=180, devices=None, battery_fields=None):
+    fetcher = _get_data_fetcher(auth_config["url"], auth_config["token"], auth_config["org"])
+    return fetcher.get_device_energy_status(
+        auth_config["bucket"],
+        client,
+        site,
+        serial=serial,
+        lookback_minutes=lookback_minutes,
+        devices=devices,
+        battery_fields=battery_fields,
+    )

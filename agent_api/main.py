@@ -52,7 +52,7 @@ from agent_api.pricing import get_pricing_config, resolve_default_price
 if str(APP_DIR) not in sys.path:
     sys.path.append(str(APP_DIR))
 
-from core.discovery import list_clients, list_devices, list_serials, list_sites
+from core.discovery import get_device_energy_status, list_clients, list_devices, list_serials, list_sites
 from core.report import generate_report_pdf
 from modules.email_sender import EmailSender
 
@@ -240,6 +240,52 @@ def discovery_devices(
     serial: Optional[str] = Query(default=None),
 ):
     return {"items": list_devices(_tenant_auth_or_404(tenant), client, site, serial=serial)}
+
+
+@app.get("/v1/alerts/device-energy-status")
+def alerts_device_energy_status(
+    tenant: str = Query(...),
+    client: str = Query(...),
+    site: str = Query(...),
+    serial: Optional[str] = Query(default=None),
+    lookback_minutes: int = Query(default=180),
+):
+    auth = _tenant_auth_or_404(tenant)
+    devices = list_devices(auth, client, site, serial=serial)
+    status = get_device_energy_status(auth, client, site, serial=serial, lookback_minutes=max(5, lookback_minutes))
+
+    battery_rows = status.get("battery_rows", [])
+    heartbeat_rows = status.get("heartbeat_rows", [])
+
+    latest_by_device = {}
+    for row in battery_rows:
+        device_id = row.get("deviceId")
+        if not device_id:
+            continue
+        prev = latest_by_device.get(device_id)
+        curr_at = row.get("batteryAt") or ""
+        prev_at = (prev or {}).get("batteryAt") or ""
+        if prev is None or curr_at > prev_at:
+            latest_by_device[device_id] = row
+
+    last_seen_by_device = {row.get("deviceId"): row.get("lastSeenAt") for row in heartbeat_rows if row.get("deviceId")}
+
+    items = []
+    for device in devices:
+        battery = latest_by_device.get(device)
+        items.append(
+            {
+                "deviceId": device,
+                "serial": (battery or {}).get("serial"),
+                "label": device,
+                "batteryVoltage": (battery or {}).get("voltage"),
+                "batteryField": (battery or {}).get("field"),
+                "batteryAt": (battery or {}).get("batteryAt"),
+                "lastSeenAt": last_seen_by_device.get(device),
+            }
+        )
+
+    return {"items": items}
 @app.get("/v1/pricing/resolve")
 def pricing_resolve(
     tenant: str = Query(...),
