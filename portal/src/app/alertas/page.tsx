@@ -44,6 +44,23 @@ type EntityRunTrace = {
   currentVoltage?: number;
 };
 
+function formatVoltageTransition(trace: EntityRunTrace) {
+  if (typeof trace.previousVoltage === "number" || typeof trace.currentVoltage === "number") {
+    const prev = typeof trace.previousVoltage === "number" ? trace.previousVoltage.toFixed(2) : "-";
+    const curr = typeof trace.currentVoltage === "number" ? trace.currentVoltage.toFixed(2) : "-";
+    return ` (${prev} V -> ${curr} V)`;
+  }
+  return "";
+}
+
+function formatTraceList(traces: EntityRunTrace[]) {
+  if (!traces.length) return "ninguno";
+  if (traces.length === 1) return `${traces[0].label}${formatVoltageTransition(traces[0])}`;
+  if (traces.length <= 3) return traces.map((trace) => `${trace.label}${formatVoltageTransition(trace)}`).join(", ");
+  const preview = traces.slice(0, 3).map((trace) => trace.label).join(", ");
+  return `${traces.length} equipos (${preview}...)`;
+}
+
 type AlertTypeConfig = {
   label: string;
   description: string;
@@ -1069,6 +1086,11 @@ export default function AlertasPage() {
             const presentation = buildEventPresentation(event, ruleTypeById.get(event.ruleId));
             const groupedSummary = buildGroupedAffectedSummary(event);
             const groupedItems = buildGroupedAffectedItems(event);
+            const operationalDiff = (event.debug as Record<string, unknown> | undefined)?.operationalDiff as
+              | { addedFailures?: EntityRunTrace[]; removedFailures?: EntityRunTrace[]; stillFailing?: EntityRunTrace[] }
+              | undefined;
+            const addedLastEval = Array.isArray(operationalDiff?.addedFailures) ? operationalDiff.addedFailures : [];
+            const removedLastEval = Array.isArray(operationalDiff?.removedFailures) ? operationalDiff.removedFailures : [];
             const isExpanded = Boolean(expandedGroupedEvents[event.id]);
             const showAll = Boolean(showAllGroupedEvents[event.id]);
             const hasMany = groupedItems.length > 10;
@@ -1121,6 +1143,14 @@ export default function AlertasPage() {
                     ) : null}
                   </div>
                 ) : null}
+                {event.scope.mode === "grouped" && event.status === "active" ? (
+                  <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/50 p-2 text-xs text-slate-300">
+                    <p className="font-medium text-slate-200">Cambios en última evaluación</p>
+                    {addedLastEval.length ? <p>Nuevos en fallo: {formatTraceList(addedLastEval)}</p> : null}
+                    {removedLastEval.length ? <p>Recuperados: {formatTraceList(removedLastEval)}</p> : null}
+                    {!addedLastEval.length && !removedLastEval.length ? <p>Sin cambios</p> : null}
+                  </div>
+                ) : null}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button disabled={event.status !== "active"} className="rounded-lg border border-blue-700 px-3 py-1.5 text-xs text-blue-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "ack")}>Marcar ACK</button>
                   <button disabled={event.status === "resolved"} className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "resolve")}>Marcar resuelto</button>
@@ -1153,18 +1183,16 @@ export default function AlertasPage() {
               {runFeedback.groupedOperational.some((item) => item.addedFailures.length || item.removedFailures.length || item.stillFailing.length) ? (
                 <div className="mt-2 space-y-2 text-xs text-emerald-200">
                   {runFeedback.groupedOperational.map((item, idx) => {
-                    const hasChanges = item.addedFailures.length || item.removedFailures.length || item.stillFailing.length;
+                    const currentlyFailing = [...item.stillFailing, ...item.addedFailures];
+                    const hasChanges = item.addedFailures.length || item.removedFailures.length || currentlyFailing.length;
                     if (!hasChanges) return null;
                     return (
                       <div key={`${item.ruleName}-${idx}`} className="rounded-lg border border-emerald-800/50 bg-emerald-950/20 p-2">
                         <p className="font-medium">{item.ruleName} · {(item.site ?? "site-sin-definir")} · {(item.gateway ?? "gateway-sin-definir")}</p>
-                        {item.addedFailures.map((trace, i) => (
-                          <p key={`add-${i}`}>+ Entra en fallo: {trace.label}{typeof trace.previousVoltage === "number" || typeof trace.currentVoltage === "number" ? ` (${typeof trace.previousVoltage === "number" ? trace.previousVoltage.toFixed(2) : "-"} V -> ${typeof trace.currentVoltage === "number" ? trace.currentVoltage.toFixed(2) : "-"} V)` : ""}</p>
-                        ))}
-                        {item.removedFailures.map((trace, i) => (
-                          <p key={`rm-${i}`}>- Recuperado: {trace.label}{typeof trace.previousVoltage === "number" || typeof trace.currentVoltage === "number" ? ` (${typeof trace.previousVoltage === "number" ? trace.previousVoltage.toFixed(2) : "-"} V -> ${typeof trace.currentVoltage === "number" ? trace.currentVoltage.toFixed(2) : "-"} V)` : ""}</p>
-                        ))}
-                        {item.stillFailing.length ? <p>En fallo tras evaluación: {item.stillFailing.map((trace) => trace.label).join(", ")}</p> : null}
+                        <p>Actualmente en fallo: {formatTraceList(currentlyFailing)}</p>
+                        {item.addedFailures.length ? <p>Nuevos en esta evaluación: {formatTraceList(item.addedFailures)}</p> : null}
+                        {item.removedFailures.length ? <p>Recuperados en esta evaluación: {formatTraceList(item.removedFailures)}</p> : null}
+                        {!item.addedFailures.length && !item.removedFailures.length ? <p>Sin cambios en el grupo activo.</p> : null}
                       </div>
                     );
                   })}
