@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { buildEventPresentation, buildGroupedAffectedItems, buildGroupedAffectedSummary } from "@/lib/alerts-event-messages";
+import { buildEventOriginTrace, buildEventPresentation, buildGroupedAffectedItems, buildGroupedAffectedSummary } from "@/lib/alerts-event-messages";
 import {
   ALERT_DATA_SOURCES,
   ALERT_ROLES,
@@ -352,7 +352,7 @@ function buildGroupedVoltageScenario(voltages: [number, number, number]) {
 const groupedVoltageFlowPresets = {
   oneFail: buildGroupedVoltageScenario([3.19, 3.45, 3.45]),
   twoFail: buildGroupedVoltageScenario([3.19, 3.29, 3.45]),
-  threeFail: buildGroupedVoltageScenario([3.19, 3.29, 3.19]),
+  threeFail: buildGroupedVoltageScenario([3.19, 3.19, 3.19]),
   partialRecovery: buildGroupedVoltageScenario([3.45, 3.29, 3.19]),
   allOk: buildGroupedVoltageScenario([3.45, 3.45, 3.45]),
 } as const;
@@ -1046,6 +1046,7 @@ export default function AlertasPage() {
                 </div>
                 <p className="mt-1 text-sm text-slate-300">{presentation.headline}</p>
                 <p className="text-xs text-slate-500">{event.timestamp} · {event.scope.tenant}/{event.scope.client ?? "-"}/{event.scope.site ?? "-"}</p>
+                <p className="text-xs text-slate-400">{buildEventOriginTrace(event)}</p>
                 <p className="mt-1 text-xs text-slate-400">{presentation.subheadline} · Regla: {event.ruleId}</p>
                 {groupedSummary ? (
                   <div className="mt-1 text-xs text-slate-300">

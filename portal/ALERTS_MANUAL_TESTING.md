@@ -115,3 +115,4 @@ Secuencia recomendada para validar ciclo completo:
 Notas:
 - En grouped, la UI muestra resumen compacto y permite `Ver detalles` para drill-down de equipos/voltaje.
 - En listas grandes, se limita vista inicial y permite `Ver todos`.
+- La tarjeta de evento muestra traza de origen: `site · gateway/serial` para lectura rápida de operación.

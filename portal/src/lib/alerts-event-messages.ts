@@ -237,3 +237,14 @@ export function buildGroupedAffectedSummary(event: AlertEvent): string | null {
   if (count <= 3) return `${count} equipos afectados: ${items.map((item) => formatAffectedItem(item)).join(", ")}`;
   return `${count} equipos en fallo`;
 }
+
+export function buildEventOriginTrace(event: AlertEvent): string {
+  const site = cleanText(event.scope?.site, "site-sin-definir");
+  const serialCandidates = [
+    ...(event.scope?.serials ?? []),
+    ...event.affected.map((item) => item.serial).filter((value): value is string => typeof value === "string" && value.trim().length > 0),
+  ];
+  const uniqueSerials = Array.from(new Set(serialCandidates.map((item) => item.trim()).filter(Boolean)));
+  const serialText = uniqueSerials.length ? uniqueSerials.join(", ") : "gateway-sin-definir";
+  return `${site} · ${serialText}`;
+}

@@ -155,6 +155,37 @@ export async function resolveActiveEventsByRule(ruleId: string, entityKeys: stri
   });
 }
 
+export async function upsertGroupedActiveEvent(nextEvent: AlertEvent) {
+  return withLock(async () => {
+    const events = await readJson<AlertEvent[]>(eventsPath, []);
+    let keptOne = false;
+    let targetId: string | null = null;
+    const next = events.map((event) => {
+      if (event.ruleId !== nextEvent.ruleId || event.status !== "active" || event.scope?.mode !== "grouped") return event;
+      if (!keptOne) {
+        keptOne = true;
+        targetId = event.id;
+        return {
+          ...event,
+          timestamp: nextEvent.timestamp,
+          severity: nextEvent.severity,
+          ruleName: nextEvent.ruleName,
+          scope: nextEvent.scope,
+          affected: nextEvent.affected,
+          message: nextEvent.message,
+          details: nextEvent.details,
+          debug: nextEvent.debug,
+        };
+      }
+      return { ...event, status: "resolved" as const };
+    });
+
+    const merged = keptOne ? next : [nextEvent, ...next];
+    await atomicWrite(eventsPath, applyRetention(merged));
+    return { updated: keptOne, eventId: targetId ?? nextEvent.id };
+  });
+}
+
 export async function getState() {
   return readJson<AlertsState>(statePath, {
     engineStatus: "ok",
