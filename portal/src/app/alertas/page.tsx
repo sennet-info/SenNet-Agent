@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { buildEventPresentation } from "@/lib/alerts-event-messages";
 import {
   ALERT_DATA_SOURCES,
   ALERT_ROLES,
@@ -354,23 +355,6 @@ function normalizeEventForView(event: AlertEvent) {
       mode: event.scope?.mode ?? "grouped",
     },
   };
-}
-
-function buildGroupedRecoveryMessage(event: AlertEvent, ruleType?: AlertRuleType) {
-  if (!(event.status === "resolved" && event.scope.mode === "grouped")) return event.message;
-  if (ruleType?.startsWith("battery_voltage_critical")) return "Grupo recuperado: ya no hay baterías en nivel crítico";
-  if (ruleType?.startsWith("battery_voltage_low")) return "Grupo recuperado: ya no hay baterías por debajo del umbral";
-  if (ruleType?.startsWith("battery_low")) return "Grupo recuperado: baterías nuevamente en rango";
-  if (ruleType === "heartbeat") return "Grupo recuperado: equipos reportando nuevamente";
-  if (event.message.toLowerCase().startsWith("recuperación de grupo")) return "Grupo recuperado: condición normalizada";
-  return event.message;
-}
-
-function buildAffectedLine(event: AlertEvent) {
-  if (event.status === "resolved" && event.scope.mode === "grouped") {
-    return "Grupo recuperado · Equipos actualmente en alarma: 0";
-  }
-  return `Afectados: ${event.affected.length}`;
 }
 
 function FieldBlock({ label, help, children }: { label: string; help?: string; children: React.ReactNode }) {
@@ -993,7 +977,9 @@ export default function AlertasPage() {
             <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => clearEvents("all")}>Borrar todos los eventos</button>
           </div>
           {eventsForView.length === 0 ? <p className="rounded-lg border border-dashed border-slate-700 p-6 text-sm text-slate-400">Sin eventos para el filtro seleccionado.</p> : null}
-          {eventsForView.map((event) => (
+          {eventsForView.map((event) => {
+            const presentation = buildEventPresentation(event, ruleTypeById.get(event.ruleId));
+            return (
               <div key={event.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-medium">{event.ruleName}</p>
@@ -1003,16 +989,17 @@ export default function AlertasPage() {
                     <span className="rounded-full bg-slate-800 px-2 py-1 text-slate-200">{event.scope.mode}</span>
                   </div>
                 </div>
-                <p className="mt-1 text-sm text-slate-300">{buildGroupedRecoveryMessage(event, ruleTypeById.get(event.ruleId))}</p>
+                <p className="mt-1 text-sm text-slate-300">{presentation.headline}</p>
                 <p className="text-xs text-slate-500">{event.timestamp} · {event.scope.tenant}/{event.scope.client ?? "-"}/{event.scope.site ?? "-"}</p>
-                <p className="mt-1 text-xs text-slate-400">{buildAffectedLine(event)} · Regla: {event.ruleId}</p>
+                <p className="mt-1 text-xs text-slate-400">{presentation.subheadline} · Regla: {event.ruleId}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button disabled={event.status !== "active"} className="rounded-lg border border-blue-700 px-3 py-1.5 text-xs text-blue-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "ack")}>Marcar ACK</button>
                   <button disabled={event.status === "resolved"} className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "resolve")}>Marcar resuelto</button>
                   <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => deleteEvent(event.id)}>Eliminar</button>
                 </div>
               </div>
-          ))}
+            );
+          })}
         </div>
       ) : null}
 

@@ -87,7 +87,10 @@ Presets recomendados:
 - **Demos / QA**: `dataSource=mock` + presets + Validar.
 - **Producción**: `dataSource=real` + ejecución por scheduler/motor + revisión de retención.
 
-## 8) Visualización de recoveries (grouped vs per_device)
+## 8) Mensajes dinámicos en UI (grouped vs per_device)
 
-- En `grouped` y estado `resolved`, la UI muestra copy operacional (ej. “Grupo recuperado...”) y evita el texto confuso `Afectados: 0`.
-- En `per_device`, se mantiene el detalle por entidad afectada para seguimiento técnico.
+- La UI construye `headline/subheadline` semánticos por evento usando `ruleType + status + scope.mode + affected + debug`.
+- `grouped` prioriza copy operativo global (ej.: “Voltaje bajo detectado”, “Dispositivos sin comunicación”, “Voltajes en rango”).
+- `per_device` prioriza entidad puntual (ej.: “Batería A con voltaje bajo: 3.29 V”, “Sensor X volvió a comunicar”).
+- `active` comunica detección actual; `resolved` comunica recuperación; `ack` se muestra como seguimiento sin alterar motor.
+- Fallback histórico: si no hay datos suficientes para inferencia, se usa `event.message` original y se evita `undefined/null`.
