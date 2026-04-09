@@ -25,7 +25,7 @@ type RuleEvalResult = {
   typeSpecificDebug: Record<string, unknown>;
   affected: Array<{ serial?: string; deviceId?: string; label?: string }>;
 };
-type AffectedItem = { serial?: string; deviceId?: string; label?: string };
+type AffectedItem = { serial?: string; deviceId?: string; label?: string; batteryVoltage?: number };
 type EntityStateMap = Record<string, { status: "ok" | "fail"; lastChangeAt: string; meta?: AffectedItem }>;
 
 type AlertsDataAdapter = {
@@ -124,6 +124,26 @@ function buildEventsFromResult(rule: AlertRule, result: RuleEvalResult): AlertEv
 
 function getEntityKey(item: AffectedItem, idx = 0) {
   return item.deviceId ?? item.serial ?? item.label ?? `entity-${idx}`;
+}
+
+type EntityTrace = {
+  label: string;
+  deviceId?: string;
+  serial?: string;
+  site?: string;
+  previousVoltage?: number;
+  currentVoltage?: number;
+};
+
+function toTrace(item: AffectedItem | undefined, site: string | undefined, previousVoltage?: number, currentVoltage?: number): EntityTrace {
+  return {
+    label: item?.label ?? item?.deviceId ?? item?.serial ?? "Equipo",
+    deviceId: item?.deviceId,
+    serial: item?.serial,
+    site,
+    previousVoltage,
+    currentVoltage,
+  };
 }
 
 function buildRecoveryEvent(rule: AlertRule, item: AffectedItem, sourceMessage: string): AlertEvent {
@@ -291,8 +311,22 @@ async function evalRule(rule: AlertRule, adapter: AlertsDataAdapter): Promise<Ru
         evaluationReason: fired ? "Se detectó batería baja por voltaje real" : "Voltaje en rango",
         inputsRaw: { thresholdVoltage: threshold, criticalVoltage: p.criticalVoltage, dataSource, batteries: normalizedSamples.slice(0, 30) },
         inputsUsed: { thresholdVoltage: threshold, criticalVoltage, scopedBatteriesCount: scopedBatteries.length, lowCount: low.length, criticalCount: critical.length },
-        typeSpecificDebug: { kind: "battery_voltage", level: severityLevel, mode: isAll ? "ALL" : "ANY", lowDevices: low, criticalDevices: critical, dataSource, profile },
-        affected: low.map((item) => ({ serial: item.serial, deviceId: item.deviceId, label: item.label })),
+        typeSpecificDebug: {
+          kind: "battery_voltage",
+          level: severityLevel,
+          mode: isAll ? "ALL" : "ANY",
+          lowDevices: low,
+          criticalDevices: critical,
+          scopedDevices: scopedBatteries.map((item) => ({
+            serial: item.serial,
+            deviceId: item.deviceId,
+            label: item.label ?? item.deviceId,
+            batteryVoltage: item.voltage != null ? Number(item.voltage) : undefined,
+          })),
+          dataSource,
+          profile,
+        },
+        affected: low.map((item) => ({ serial: item.serial, deviceId: item.deviceId, label: item.label, batteryVoltage: item.batteryVoltage })),
       };
     }
 
@@ -372,6 +406,15 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
   let enteredFailKeys: string[] = [];
   let recoveredKeys: string[] = [];
   let currentEntityState: EntityStateMap = {};
+  const scopedDevicesForTrace = Array.isArray((result.typeSpecificDebug as Record<string, unknown> | undefined)?.scopedDevices)
+    ? ((result.typeSpecificDebug as Record<string, unknown>).scopedDevices as Array<Record<string, unknown>>)
+    : [];
+  const currentVoltagesByKey = new Map<string, number>();
+  for (const item of scopedDevicesForTrace) {
+    const key = String(item.deviceId ?? item.serial ?? item.label ?? "");
+    const voltage = Number(item.batteryVoltage);
+    if (key && Number.isFinite(voltage)) currentVoltagesByKey.set(key, voltage);
+  }
 
   if (rule.scope.mode === "grouped") {
     const shouldNotifyByEdge = rule.notifications.triggerMode === "edge" ? previousOk !== !result.fired : result.fired;
@@ -382,7 +425,18 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
 
     if (result.fired && shouldNotifyByEdge) simulatedEvents = failureEvents;
     if (!result.fired && !previousOk && shouldNotifyByEdge) {
-      const recoveredFromState = prevEntityKeys.map((key) => prevEntityMeta[key]).filter(Boolean);
+      const recoveredFromState = prevEntityKeys.map((key) => prevEntityMeta[key]).filter(Boolean).map((item) => ({
+        ...item,
+        batteryVoltage: typeof item.batteryVoltage === "number" ? item.batteryVoltage : undefined,
+      }));
+      const recoveredEntitiesDetailed = prevEntityKeys.map((key) => ({
+        key,
+        label: prevEntityMeta[key]?.label ?? prevEntityMeta[key]?.deviceId ?? prevEntityMeta[key]?.serial ?? key,
+        deviceId: prevEntityMeta[key]?.deviceId,
+        serial: prevEntityMeta[key]?.serial,
+        previousVoltage: typeof prevEntityMeta[key]?.batteryVoltage === "number" ? prevEntityMeta[key]?.batteryVoltage : undefined,
+        currentVoltage: currentVoltagesByKey.get(key),
+      }));
       simulatedEvents = [{
         id: randomUUID(),
         timestamp: nowIso(),
@@ -393,7 +447,7 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
         affected: recoveredFromState.length ? recoveredFromState : fallbackAffectedFromScope(rule),
         message: `Recuperación de grupo: ${rule.name}`,
         details: "Condición de alerta recuperada",
-        debug: { transition: "fail_to_ok", mode: "grouped", recoveredEntities: recoveredFromState },
+        debug: { transition: "fail_to_ok", mode: "grouped", recoveredEntities: recoveredFromState, recoveredEntitiesDetailed },
         status: "resolved",
       }];
     }
@@ -466,7 +520,7 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
     would_notify: simulatedEvents.length > 0,
     suppressed_by: [...(simulatedEvents.length ? [] : ["edge_or_condition"]), ...(cooldownBlocked ? ["cooldown"] : [])],
     delivery_preview: simulatedEvents.length ? previewDelivery(rule) : undefined,
-    type_specific_debug: { ...result.typeSpecificDebug, enteredFailKeys, recoveredKeys, previousEntityState: prevEntityState, currentEntityState },
+    type_specific_debug: { ...result.typeSpecificDebug, enteredFailKeys, recoveredKeys, previousEntityState: prevEntityState, currentEntityState, addedFailures: [], removedFailures: [], stillFailing: [], nowOk: [] },
   };
 
   const createdEvents: AlertEvent[] = [];
@@ -487,15 +541,6 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
     if (groupedResolved) await clearActiveGroupedEventsByRule(rule.id);
     else if (recoveryKeys.length) await resolveActiveEventsByRule(rule.id, recoveryKeys);
   }
-  if (!manual && rule.scope.mode === "grouped" && result.fired && failureEvents.length > 0) {
-    const baseEvent = failureEvents[0];
-    const groupedEvent: AlertEvent = {
-      ...baseEvent,
-      debug: { ...(baseEvent.debug ?? {}), validationSummary: { fired: debugEnvelope.fired, message: debugEnvelope.message, reason: debugEnvelope.evaluation_reason, dataSource: getRuleDataSource(rule) } },
-    };
-    await upsertGroupedActiveEvent(groupedEvent);
-  }
-
   const markNow = nowIso();
   const entityLastNotifiedAt = { ...prevEntityLastNotifiedAt };
   for (const [idx, event] of createdEvents.entries()) {
@@ -507,7 +552,52 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
     const item = event.affected[0] ?? { label: `entity-${idx}` };
     currentEntityMap.set(getEntityKey(item, idx), item);
   }
+  const prevEntityMap = new Map<string, AffectedItem>();
+  for (const key of prevEntityKeys) {
+    const meta = prevEntityMeta[key];
+    if (meta) prevEntityMap.set(key, meta);
+  }
+  const currentVoltages = currentVoltagesByKey;
+  const addedFailures: EntityTrace[] = [];
+  const removedFailures: EntityTrace[] = [];
+  const stillFailing: EntityTrace[] = [];
+  const nowOk: EntityTrace[] = [];
+  for (const [key, curr] of currentEntityMap.entries()) {
+    const prev = prevEntityMap.get(key);
+    const prevVoltage = typeof prev?.batteryVoltage === "number" ? prev.batteryVoltage : undefined;
+    const currVoltage = typeof curr?.batteryVoltage === "number" ? curr.batteryVoltage : currentVoltages.get(key);
+    if (!prev) addedFailures.push(toTrace(curr, rule.scope.site, prevVoltage, currVoltage));
+    else stillFailing.push(toTrace(curr, rule.scope.site, prevVoltage, currVoltage));
+  }
+  for (const [key, prev] of prevEntityMap.entries()) {
+    if (currentEntityMap.has(key)) continue;
+    const prevVoltage = typeof prev?.batteryVoltage === "number" ? prev.batteryVoltage : undefined;
+    const currVoltage = currentVoltages.get(key);
+    const trace = toTrace(prev, rule.scope.site, prevVoltage, currVoltage);
+    removedFailures.push(trace);
+    nowOk.push(trace);
+  }
+  if (!manual && rule.scope.mode === "grouped" && result.fired && failureEvents.length > 0) {
+    const baseEvent = failureEvents[0];
+    const groupedEvent: AlertEvent = {
+      ...baseEvent,
+      debug: {
+        ...(baseEvent.debug ?? {}),
+        operationalDiff: { addedFailures, removedFailures, stillFailing, nowOk },
+        validationSummary: { fired: debugEnvelope.fired, message: debugEnvelope.message, reason: debugEnvelope.evaluation_reason, dataSource: getRuleDataSource(rule) },
+      },
+    };
+    await upsertGroupedActiveEvent(groupedEvent);
+  }
   const { next: prunedEntityState, nextNotified } = pruneEntityMap(currentEntityState, entityLastNotifiedAt);
+
+  debugEnvelope.type_specific_debug = {
+    ...debugEnvelope.type_specific_debug,
+    addedFailures,
+    removedFailures,
+    stillFailing,
+    nowOk,
+  };
 
   const updatedRule: AlertRule = {
     ...rule,
@@ -524,7 +614,27 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
     updatedAt: markNow,
   };
 
-  return { updatedRule, createdEvents, createdEvent: createdEvents[0] ?? null, elapsed, fired: result.fired, message: result.message, debug: debugEnvelope, manual };
+  return {
+    updatedRule,
+    createdEvents,
+    createdEvent: createdEvents[0] ?? null,
+    elapsed,
+    fired: result.fired,
+    message: result.message,
+    debug: debugEnvelope,
+    manual,
+    operationalDiff: {
+      mode: rule.scope.mode,
+      ruleId: rule.id,
+      ruleName: rule.name,
+      site: rule.scope.site,
+      gateway: (rule.scope.serials ?? [])[0],
+      addedFailures,
+      removedFailures,
+      stillFailing,
+      nowOk,
+    },
+  };
 }
 
 export async function runAllRules() {
@@ -537,6 +647,16 @@ export async function runAllRules() {
   let groupedDecreasedBy = 0;
   let groupedRecovered = 0;
   let groupedUnchanged = 0;
+  const groupedOperational: Array<{
+    ruleId: string;
+    ruleName: string;
+    site?: string;
+    gateway?: string;
+    addedFailures: EntityTrace[];
+    removedFailures: EntityTrace[];
+    stillFailing: EntityTrace[];
+    nowOk: EntityTrace[];
+  }> = [];
   const updated: AlertRule[] = [];
 
   for (const rule of rules) {
@@ -550,6 +670,7 @@ export async function runAllRules() {
     resolved += out.createdEvents.filter((event) => event.status === "resolved").length;
 
     if (rule.scope.mode === "grouped") {
+      groupedOperational.push(out.operationalDiff);
       const prevActive = !(rule.lastResult?.ok ?? true);
       const currActive = !(out.updatedRule.lastResult?.ok ?? true);
       const prevKeys = Array.isArray((rule.params as Record<string, unknown> | undefined)?.__activeEntityKeys)
@@ -585,11 +706,13 @@ export async function runAllRules() {
 
   const groupedChanges = {
     newActive: groupedNewActive,
+    added: groupedIncreasedBy,
     increasedBy: groupedIncreasedBy,
+    removed: groupedDecreasedBy,
     decreasedBy: groupedDecreasedBy,
     recovered: groupedRecovered,
     unchanged: groupedUnchanged,
   };
 
-  return { ok: true, evaluated: updated.length, fired, resolved, groupedChanges };
+  return { ok: true, evaluated: updated.length, fired, resolved, groupedChanges, groupedOperational };
 }

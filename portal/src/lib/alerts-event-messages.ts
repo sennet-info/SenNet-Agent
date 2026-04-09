@@ -190,6 +190,8 @@ type GroupedAffectedItem = {
   key: string;
   label: string;
   voltage: number | null;
+  previousVoltage: number | null;
+  currentVoltage: number | null;
 };
 
 function toEntityKey(item: { label?: string; deviceId?: string; serial?: string }, idx: number) {
@@ -206,11 +208,23 @@ export function buildGroupedAffectedItems(event: AlertEvent): GroupedAffectedIte
   const lowDevices = Array.isArray(debug.lowDevices) ? (debug.lowDevices as AffectedDevice[]) : [];
   const criticalDevices = Array.isArray(debug.criticalDevices) ? (debug.criticalDevices as AffectedDevice[]) : [];
   const voltageByKey = new Map<string, number>();
+  const recoveredVoltageByKey = new Map<string, { previousVoltage: number | null; currentVoltage: number | null }>();
 
   for (const item of [...criticalDevices, ...lowDevices]) {
     if (typeof item.batteryVoltage !== "number" || !Number.isFinite(item.batteryVoltage)) continue;
     const key = toEntityKey(item, 0);
     voltageByKey.set(key, item.batteryVoltage);
+  }
+  const recoveredDetailed = Array.isArray(debug.recoveredEntitiesDetailed) ? (debug.recoveredEntitiesDetailed as Array<Record<string, unknown>>) : [];
+  for (const item of recoveredDetailed) {
+    const key = String(item.deviceId ?? item.serial ?? item.label ?? item.key ?? "");
+    if (!key) continue;
+    const previousVoltage = Number(item.previousVoltage);
+    const currentVoltage = Number(item.currentVoltage);
+    recoveredVoltageByKey.set(key, {
+      previousVoltage: Number.isFinite(previousVoltage) ? previousVoltage : null,
+      currentVoltage: Number.isFinite(currentVoltage) ? currentVoltage : null,
+    });
   }
 
   return event.affected.map((item, idx) => {
@@ -219,12 +233,23 @@ export function buildGroupedAffectedItems(event: AlertEvent): GroupedAffectedIte
       key,
       label: safeLabel(item, idx),
       voltage: voltageByKey.get(key) ?? null,
+      previousVoltage: recoveredVoltageByKey.get(key)?.previousVoltage ?? (typeof item.batteryVoltage === "number" ? item.batteryVoltage : null),
+      currentVoltage: recoveredVoltageByKey.get(key)?.currentVoltage ?? null,
     };
   });
 }
 
 function formatAffectedItem(item: GroupedAffectedItem) {
   return item.voltage != null ? `${item.label} (${item.voltage.toFixed(2)} V)` : item.label;
+}
+
+function formatRecoveredItem(item: GroupedAffectedItem) {
+  if (item.previousVoltage != null || item.currentVoltage != null) {
+    const prev = item.previousVoltage != null ? item.previousVoltage.toFixed(2) : "-";
+    const curr = item.currentVoltage != null ? item.currentVoltage.toFixed(2) : "-";
+    return `${item.label} (${prev} V -> ${curr} V)`;
+  }
+  return item.label;
 }
 
 export function buildGroupedAffectedSummary(event: AlertEvent): string | null {
@@ -234,8 +259,8 @@ export function buildGroupedAffectedSummary(event: AlertEvent): string | null {
   if (!count) return null;
 
   if (event.status === "resolved") {
-    if (count === 1) return `Equipo recuperado: ${formatAffectedItem(items[0])}`;
-    if (count <= 3) return `Equipos recuperados: ${items.map((item) => formatAffectedItem(item)).join(", ")}`;
+    if (count === 1) return `Equipo recuperado: ${formatRecoveredItem(items[0])}`;
+    if (count <= 3) return `Equipos recuperados: ${items.map((item) => formatRecoveredItem(item)).join(", ")}`;
     return `${count} equipos recuperados`;
   }
 

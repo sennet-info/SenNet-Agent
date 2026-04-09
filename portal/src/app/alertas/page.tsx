@@ -27,10 +27,21 @@ type DiscoveryState = {
 
 type GroupedRunChanges = {
   newActive: number;
+  added: number;
+  removed: number;
   increasedBy: number;
   decreasedBy: number;
   recovered: number;
   unchanged: number;
+};
+
+type EntityRunTrace = {
+  label: string;
+  serial?: string;
+  deviceId?: string;
+  site?: string;
+  previousVoltage?: number;
+  currentVoltage?: number;
 };
 
 type AlertTypeConfig = {
@@ -481,7 +492,7 @@ export default function AlertasPage() {
   const [saving, setSaving] = useState(false);
   const [testingRuleId, setTestingRuleId] = useState<string | null>(null);
   const [runningNow, setRunningNow] = useState(false);
-  const [runFeedback, setRunFeedback] = useState<{ evaluated: number; fired: number; resolved: number; groupedChanges: GroupedRunChanges; summary: string; ranAt: string } | null>(null);
+  const [runFeedback, setRunFeedback] = useState<{ evaluated: number; fired: number; resolved: number; groupedChanges: GroupedRunChanges; groupedOperational: Array<{ ruleName: string; site?: string; gateway?: string; addedFailures: EntityRunTrace[]; removedFailures: EntityRunTrace[]; stillFailing: EntityRunTrace[]; nowOk: EntityRunTrace[] }>; summary: string; ranAt: string } | null>(null);
   const [validationResult, setValidationResult] = useState<AlertValidationDebug | null>(null);
   const [testParamsText, setTestParamsText] = useState("{}");
   const [form, setForm] = useState<Partial<AlertRule>>(emptyRule);
@@ -739,6 +750,8 @@ export default function AlertasPage() {
       if (!resp.ok) throw new Error(data?.detail ?? "No se pudo ejecutar el motor");
       const groupedChanges: GroupedRunChanges = {
         newActive: Number(data?.groupedChanges?.newActive ?? 0),
+        added: Number(data?.groupedChanges?.added ?? data?.groupedChanges?.increasedBy ?? 0),
+        removed: Number(data?.groupedChanges?.removed ?? data?.groupedChanges?.decreasedBy ?? 0),
         increasedBy: Number(data?.groupedChanges?.increasedBy ?? 0),
         decreasedBy: Number(data?.groupedChanges?.decreasedBy ?? 0),
         recovered: Number(data?.groupedChanges?.recovered ?? 0),
@@ -746,15 +759,17 @@ export default function AlertasPage() {
       };
       const summaryParts: string[] = [];
       if (groupedChanges.newActive > 0) summaryParts.push("Nuevo grupo activo detectado");
-      if (groupedChanges.increasedBy > 0) summaryParts.push(`Grupo activo actualizado (+${groupedChanges.increasedBy} equipo${groupedChanges.increasedBy === 1 ? "" : "s"} en fallo)`);
-      if (groupedChanges.decreasedBy > 0) summaryParts.push(`Grupo activo actualizado (-${groupedChanges.decreasedBy} equipo${groupedChanges.decreasedBy === 1 ? "" : "s"} recuperado${groupedChanges.decreasedBy === 1 ? "" : "s"})`);
+      if (groupedChanges.added > 0) summaryParts.push(`Grupo actualizado (+${groupedChanges.added} equipo${groupedChanges.added === 1 ? "" : "s"} en fallo)`);
+      if (groupedChanges.removed > 0) summaryParts.push(`Grupo actualizado (-${groupedChanges.removed} equipo${groupedChanges.removed === 1 ? "" : "s"} recuperado${groupedChanges.removed === 1 ? "" : "s"})`);
       if (groupedChanges.recovered > 0) summaryParts.push("Grupo recuperado");
       if (!summaryParts.length) summaryParts.push("Sin cambios en el grupo activo");
+      const groupedOperational = Array.isArray(data?.groupedOperational) ? data.groupedOperational : [];
       setRunFeedback({
         evaluated: Number(data?.evaluated ?? 0),
         fired: Number(data?.fired ?? 0),
         resolved: Number(data?.resolved ?? 0),
         groupedChanges,
+        groupedOperational,
         summary: summaryParts.join(" · "),
         ranAt: new Date().toISOString(),
       });
@@ -1135,6 +1150,26 @@ export default function AlertasPage() {
               <p className="text-sm text-emerald-100">
                 Ejecución real completada ({runFeedback.ranAt}): <b>{runFeedback.evaluated}</b> regla(s) evaluada(s), <b>{runFeedback.fired}</b> disparada(s), <b>{runFeedback.resolved}</b> resuelta(s) · {runFeedback.summary}.
               </p>
+              {runFeedback.groupedOperational.some((item) => item.addedFailures.length || item.removedFailures.length || item.stillFailing.length) ? (
+                <div className="mt-2 space-y-2 text-xs text-emerald-200">
+                  {runFeedback.groupedOperational.map((item, idx) => {
+                    const hasChanges = item.addedFailures.length || item.removedFailures.length || item.stillFailing.length;
+                    if (!hasChanges) return null;
+                    return (
+                      <div key={`${item.ruleName}-${idx}`} className="rounded-lg border border-emerald-800/50 bg-emerald-950/20 p-2">
+                        <p className="font-medium">{item.ruleName} · {(item.site ?? "site-sin-definir")} · {(item.gateway ?? "gateway-sin-definir")}</p>
+                        {item.addedFailures.map((trace, i) => (
+                          <p key={`add-${i}`}>+ Entra en fallo: {trace.label}{typeof trace.previousVoltage === "number" || typeof trace.currentVoltage === "number" ? ` (${typeof trace.previousVoltage === "number" ? trace.previousVoltage.toFixed(2) : "-"} V -> ${typeof trace.currentVoltage === "number" ? trace.currentVoltage.toFixed(2) : "-"} V)` : ""}</p>
+                        ))}
+                        {item.removedFailures.map((trace, i) => (
+                          <p key={`rm-${i}`}>- Recuperado: {trace.label}{typeof trace.previousVoltage === "number" || typeof trace.currentVoltage === "number" ? ` (${typeof trace.previousVoltage === "number" ? trace.previousVoltage.toFixed(2) : "-"} V -> ${typeof trace.currentVoltage === "number" ? trace.currentVoltage.toFixed(2) : "-"} V)` : ""}</p>
+                        ))}
+                        {item.stillFailing.length ? <p>En fallo tras evaluación: {item.stillFailing.map((trace) => trace.label).join(", ")}</p> : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
               <button className="mt-2 rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => setTab("events")}>
                 Ver eventos generados
               </button>
