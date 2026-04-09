@@ -233,6 +233,12 @@ export function buildGroupedAffectedSummary(event: AlertEvent): string | null {
   const count = items.length;
   if (!count) return null;
 
+  if (event.status === "resolved") {
+    if (count === 1) return `Equipo recuperado: ${formatAffectedItem(items[0])}`;
+    if (count <= 3) return `Equipos recuperados: ${items.map((item) => formatAffectedItem(item)).join(", ")}`;
+    return `${count} equipos recuperados`;
+  }
+
   if (count === 1) return formatAffectedItem(items[0]);
   if (count <= 3) return `${count} equipos afectados: ${items.map((item) => formatAffectedItem(item)).join(", ")}`;
   return `${count} equipos en fallo`;

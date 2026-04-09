@@ -25,6 +25,14 @@ type DiscoveryState = {
   devices: string[];
 };
 
+type GroupedRunChanges = {
+  newActive: number;
+  increasedBy: number;
+  decreasedBy: number;
+  recovered: number;
+  unchanged: number;
+};
+
 type AlertTypeConfig = {
   label: string;
   description: string;
@@ -473,7 +481,7 @@ export default function AlertasPage() {
   const [saving, setSaving] = useState(false);
   const [testingRuleId, setTestingRuleId] = useState<string | null>(null);
   const [runningNow, setRunningNow] = useState(false);
-  const [runFeedback, setRunFeedback] = useState<{ evaluated: number; fired: number; ranAt: string } | null>(null);
+  const [runFeedback, setRunFeedback] = useState<{ evaluated: number; fired: number; resolved: number; groupedChanges: GroupedRunChanges; summary: string; ranAt: string } | null>(null);
   const [validationResult, setValidationResult] = useState<AlertValidationDebug | null>(null);
   const [testParamsText, setTestParamsText] = useState("{}");
   const [form, setForm] = useState<Partial<AlertRule>>(emptyRule);
@@ -729,9 +737,25 @@ export default function AlertasPage() {
       const resp = await fetch("/api/alerts/run", { method: "POST", headers: authHeaders });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data?.detail ?? "No se pudo ejecutar el motor");
+      const groupedChanges: GroupedRunChanges = {
+        newActive: Number(data?.groupedChanges?.newActive ?? 0),
+        increasedBy: Number(data?.groupedChanges?.increasedBy ?? 0),
+        decreasedBy: Number(data?.groupedChanges?.decreasedBy ?? 0),
+        recovered: Number(data?.groupedChanges?.recovered ?? 0),
+        unchanged: Number(data?.groupedChanges?.unchanged ?? 0),
+      };
+      const summaryParts: string[] = [];
+      if (groupedChanges.newActive > 0) summaryParts.push("Nuevo grupo activo detectado");
+      if (groupedChanges.increasedBy > 0) summaryParts.push(`Grupo activo actualizado (+${groupedChanges.increasedBy} equipo${groupedChanges.increasedBy === 1 ? "" : "s"} en fallo)`);
+      if (groupedChanges.decreasedBy > 0) summaryParts.push(`Grupo activo actualizado (-${groupedChanges.decreasedBy} equipo${groupedChanges.decreasedBy === 1 ? "" : "s"} recuperado${groupedChanges.decreasedBy === 1 ? "" : "s"})`);
+      if (groupedChanges.recovered > 0) summaryParts.push("Grupo recuperado");
+      if (!summaryParts.length) summaryParts.push("Sin cambios en el grupo activo");
       setRunFeedback({
         evaluated: Number(data?.evaluated ?? 0),
         fired: Number(data?.fired ?? 0),
+        resolved: Number(data?.resolved ?? 0),
+        groupedChanges,
+        summary: summaryParts.join(" · "),
         ranAt: new Date().toISOString(),
       });
       await loadAll();
@@ -1024,6 +1048,7 @@ export default function AlertasPage() {
             <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => clearEvents("resolved")}>Limpiar resueltos (seguro)</button>
             <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => clearEvents("all")}>Borrar todos los eventos</button>
           </div>
+          <p className="text-xs text-slate-400">Los eventos resueltos tienen retención automática limitada (por defecto 7 días, configurable por <code>ALERTS_EVENTS_RETENTION_DAYS</code>) y también pueden limpiarse manualmente.</p>
           {eventsForView.length === 0 ? <p className="rounded-lg border border-dashed border-slate-700 p-6 text-sm text-slate-400">Sin eventos para el filtro seleccionado.</p> : null}
           {eventsForView.map((event) => {
             const presentation = buildEventPresentation(event, ruleTypeById.get(event.ruleId));
@@ -1108,7 +1133,7 @@ export default function AlertasPage() {
           {runFeedback ? (
             <div className="rounded-xl border border-emerald-700/60 bg-emerald-950/30 p-4 md:col-span-2 xl:col-span-3">
               <p className="text-sm text-emerald-100">
-                Ejecución real completada ({runFeedback.ranAt}): <b>{runFeedback.evaluated}</b> regla(s) evaluada(s), <b>{runFeedback.fired}</b> disparada(s).
+                Ejecución real completada ({runFeedback.ranAt}): <b>{runFeedback.evaluated}</b> regla(s) evaluada(s), <b>{runFeedback.fired}</b> disparada(s), <b>{runFeedback.resolved}</b> resuelta(s) · {runFeedback.summary}.
               </p>
               <button className="mt-2 rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => setTab("events")}>
                 Ver eventos generados

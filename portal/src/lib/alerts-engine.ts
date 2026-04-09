@@ -382,7 +382,20 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
 
     if (result.fired && shouldNotifyByEdge) simulatedEvents = failureEvents;
     if (!result.fired && !previousOk && shouldNotifyByEdge) {
-      simulatedEvents = [{ id: randomUUID(), timestamp: nowIso(), severity: rule.severity, ruleId: rule.id, ruleName: rule.name, scope: rule.scope, affected: fallbackAffectedFromScope(rule), message: `Recuperación de grupo: ${rule.name}`, details: "Condición de alerta recuperada", debug: { transition: "fail_to_ok", mode: "grouped" }, status: "resolved" }];
+      const recoveredFromState = prevEntityKeys.map((key) => prevEntityMeta[key]).filter(Boolean);
+      simulatedEvents = [{
+        id: randomUUID(),
+        timestamp: nowIso(),
+        severity: rule.severity,
+        ruleId: rule.id,
+        ruleName: rule.name,
+        scope: rule.scope,
+        affected: recoveredFromState.length ? recoveredFromState : fallbackAffectedFromScope(rule),
+        message: `Recuperación de grupo: ${rule.name}`,
+        details: "Condición de alerta recuperada",
+        debug: { transition: "fail_to_ok", mode: "grouped", recoveredEntities: recoveredFromState },
+        status: "resolved",
+      }];
     }
     const isRecoveryEvent = simulatedEvents.some((event) => event.status === "resolved");
     if (simulatedEvents.length && !cooldownPass && !isRecoveryEvent) {
@@ -518,6 +531,12 @@ export async function runAllRules() {
   const rules = await listRules();
   const started = Date.now();
   let fired = 0;
+  let resolved = 0;
+  let groupedNewActive = 0;
+  let groupedIncreasedBy = 0;
+  let groupedDecreasedBy = 0;
+  let groupedRecovered = 0;
+  let groupedUnchanged = 0;
   const updated: AlertRule[] = [];
 
   for (const rule of rules) {
@@ -528,6 +547,27 @@ export async function runAllRules() {
     const out = await evaluateRule(rule);
     updated.push(out.updatedRule);
     fired += out.createdEvents.length;
+    resolved += out.createdEvents.filter((event) => event.status === "resolved").length;
+
+    if (rule.scope.mode === "grouped") {
+      const prevActive = !(rule.lastResult?.ok ?? true);
+      const currActive = !(out.updatedRule.lastResult?.ok ?? true);
+      const prevKeys = Array.isArray((rule.params as Record<string, unknown> | undefined)?.__activeEntityKeys)
+        ? ((rule.params as Record<string, unknown>).__activeEntityKeys as string[])
+        : [];
+      const currKeys = Array.isArray((out.updatedRule.params as Record<string, unknown> | undefined)?.__activeEntityKeys)
+        ? ((out.updatedRule.params as Record<string, unknown>).__activeEntityKeys as string[])
+        : [];
+      const delta = currKeys.length - prevKeys.length;
+
+      if (!prevActive && currActive) groupedNewActive += 1;
+      else if (prevActive && !currActive) groupedRecovered += 1;
+      else if (prevActive && currActive) {
+        if (delta > 0) groupedIncreasedBy += delta;
+        else if (delta < 0) groupedDecreasedBy += Math.abs(delta);
+        else groupedUnchanged += 1;
+      }
+    }
   }
 
   await saveRules(updated);
@@ -543,5 +583,13 @@ export async function runAllRules() {
     lastError: undefined,
   });
 
-  return { ok: true, evaluated: updated.length, fired };
+  const groupedChanges = {
+    newActive: groupedNewActive,
+    increasedBy: groupedIncreasedBy,
+    decreasedBy: groupedDecreasedBy,
+    recovered: groupedRecovered,
+    unchanged: groupedUnchanged,
+  };
+
+  return { ok: true, evaluated: updated.length, fired, resolved, groupedChanges };
 }

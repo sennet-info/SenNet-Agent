@@ -8,7 +8,7 @@ const rulesPath = path.join(dataDir, "alerts_rules.json");
 const eventsPath = path.join(dataDir, "alerts_events.json");
 const statePath = path.join(dataDir, "alerts_state.json");
 const lockPath = path.join(dataDir, ".alerts.lock");
-const retentionDays = Number(process.env.ALERTS_EVENTS_RETENTION_DAYS ?? 30);
+const retentionDays = Number(process.env.ALERTS_EVENTS_RETENTION_DAYS ?? 7);
 const maxEvents = Number(process.env.ALERTS_EVENTS_MAX ?? 2000);
 
 async function withLock<T>(fn: () => Promise<T>): Promise<T> {

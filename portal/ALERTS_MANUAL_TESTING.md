@@ -116,3 +116,16 @@ Notas:
 - En grouped, la UI muestra resumen compacto y permite `Ver detalles` para drill-down de equipos/voltaje.
 - En listas grandes, se limita vista inicial y permite `Ver todos`.
 - La tarjeta de evento muestra traza de origen: `site · gateway/serial` para lectura rápida de operación.
+- En `grouped resolved`, el resumen de afectados se interpreta como recuperación (`Equipos recuperados: ...`).
+
+## 10) Retención de resueltos y trazabilidad operativa
+
+- Los eventos `active` se conservan mientras sigan activos.
+- Los eventos `resolved/ack` tienen retención automática limitada (default: **7 días**).
+- Puedes ajustar la retención con `ALERTS_EVENTS_RETENTION_DAYS`.
+- También puedes limpiar manualmente desde UI (`Limpiar resueltos` / `Borrar todos`).
+- Tras `Estado -> Ejecutar evaluación ahora`, la UI muestra un resumen operativo del cambio grouped:
+  - nuevo grupo activo
+  - incremento/decremento de equipos en fallo
+  - grupo recuperado
+  - sin cambios
