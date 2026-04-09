@@ -4,7 +4,7 @@ import { notifyForEvent, previewDelivery } from "@/lib/alerts-notify";
 import { filterSamplesByScope, normalizeEnergySamples } from "@/lib/alerts-energy-normalizer";
 import { getVoltageThresholds } from "@/lib/alerts-energy-profile";
 import { AlertDataSource, AlertEvent, AlertRule, AlertValidationDebug } from "@/lib/alerts-types";
-import { appendEvent, cleanupEventsWithRetention, getState, listRules, resolveActiveEventsByRule, saveRules, saveState, upsertGroupedActiveEvent } from "@/lib/alerts-store";
+import { appendEvent, cleanupEventsWithRetention, getState, listRules, resolveActiveEventsByRule, saveRules, saveState, upsertGroupedActiveEvent, clearActiveGroupedEventsByRule } from "@/lib/alerts-store";
 
 type BatterySample = {
   deviceId: string;
@@ -484,7 +484,7 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
     const recoveryKeys = createdEvents
       .filter((event) => event.status === "resolved" && event.scope.mode !== "grouped")
       .map((event, idx) => getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx));
-    if (groupedResolved) await resolveActiveEventsByRule(rule.id, []);
+    if (groupedResolved) await clearActiveGroupedEventsByRule(rule.id);
     else if (recoveryKeys.length) await resolveActiveEventsByRule(rule.id, recoveryKeys);
   }
   if (!manual && rule.scope.mode === "grouped" && result.fired && failureEvents.length > 0) {

@@ -186,6 +186,17 @@ export async function upsertGroupedActiveEvent(nextEvent: AlertEvent) {
   });
 }
 
+export async function clearActiveGroupedEventsByRule(ruleId: string) {
+  return withLock(async () => {
+    const events = await readJson<AlertEvent[]>(eventsPath, []);
+    const next = events.filter((event) => !(event.ruleId === ruleId && event.status === "active" && event.scope?.mode === "grouped"));
+    if (next.length !== events.length) {
+      await atomicWrite(eventsPath, applyRetention(next));
+    }
+    return { removed: events.length - next.length };
+  });
+}
+
 export async function getState() {
   return readJson<AlertsState>(statePath, {
     engineStatus: "ok",

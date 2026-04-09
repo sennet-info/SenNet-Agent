@@ -57,7 +57,7 @@ function groupedMessage(event: AlertEvent, ruleType: AlertRuleType | undefined, 
 
   if (ruleType === "heartbeat") {
     if (event.status === "resolved") {
-      return { headline: "Comunicación recuperada", subheadline: "0 equipos sin datos" };
+      return { headline: "Comunicación recuperada", subheadline: "Recuperación confirmada" };
     }
     const staleCount = getStaleCount(event, debug);
     return {
@@ -70,7 +70,7 @@ function groupedMessage(event: AlertEvent, ruleType: AlertRuleType | undefined, 
     if (event.status === "resolved") {
       return {
         headline: "Grupo recuperado: voltajes fuera de zona crítica",
-        subheadline: "0 equipos en alarma",
+        subheadline: "Recuperación confirmada",
       };
     }
     const threshold = typeof debug.criticalVoltage === "number" ? debug.criticalVoltage.toFixed(2) : null;
@@ -86,7 +86,7 @@ function groupedMessage(event: AlertEvent, ruleType: AlertRuleType | undefined, 
     if (event.status === "resolved") {
       return {
         headline: "Voltajes en rango",
-        subheadline: "0 equipos en alarma",
+        subheadline: "Recuperación confirmada",
       };
     }
     const threshold = typeof debug.thresholdVoltage === "number" ? debug.thresholdVoltage.toFixed(2) : null;
@@ -100,7 +100,7 @@ function groupedMessage(event: AlertEvent, ruleType: AlertRuleType | undefined, 
 
   if (ruleType?.startsWith("battery_low")) {
     if (event.status === "resolved") {
-      return { headline: "Baterías en rango", subheadline: "0 equipos en alarma" };
+      return { headline: "Baterías en rango", subheadline: "Recuperación confirmada" };
     }
     return {
       headline: "Batería baja detectada",
