@@ -458,14 +458,21 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
 
   const createdEvents: AlertEvent[] = [];
   if (simulatedEvents.length > 0 && !manual) {
+    if (rule.scope.mode === "grouped" && simulatedEvents.some((event) => event.status === "active")) {
+      await resolveActiveEventsByRule(rule.id, []);
+    }
     for (const event of simulatedEvents) {
       const delivery = await notifyForEvent(rule, event);
       const enrichedEvent: AlertEvent = { ...event, debug: { deliveryPreview: delivery, validationSummary: { fired: debugEnvelope.fired, message: debugEnvelope.message, reason: debugEnvelope.evaluation_reason, dataSource: getRuleDataSource(rule) } } };
       await appendEvent(enrichedEvent);
       createdEvents.push(enrichedEvent);
     }
-    const recoveryKeys = createdEvents.filter((event) => event.status === "resolved").map((event, idx) => getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx));
-    if (recoveryKeys.length) await resolveActiveEventsByRule(rule.id, recoveryKeys);
+    const groupedResolved = createdEvents.some((event) => event.status === "resolved" && event.scope.mode === "grouped");
+    const recoveryKeys = createdEvents
+      .filter((event) => event.status === "resolved" && event.scope.mode !== "grouped")
+      .map((event, idx) => getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx));
+    if (groupedResolved) await resolveActiveEventsByRule(rule.id, []);
+    else if (recoveryKeys.length) await resolveActiveEventsByRule(rule.id, recoveryKeys);
   }
 
   const markNow = nowIso();

@@ -329,6 +329,34 @@ const typeMockPresets: Record<AlertRuleType, { low: Record<string, unknown>; cri
   irregular_interval: { low: { mockObservedGapMinutes: 12 }, ok: { mockObservedGapMinutes: 5 } },
 };
 
+const groupedBatteryProfile = {
+  chemistry: "li-ion",
+  nominalVoltage: 3.6,
+  thresholds: { low: 3.3, critical: 3.2, cutoff: 3.2 },
+};
+
+function buildGroupedVoltageScenario(voltages: [number, number, number]) {
+  return {
+    warningVoltage: 3.3,
+    criticalVoltage: 3.2,
+    cutoffVoltage: 3.2,
+    batteryProfile: groupedBatteryProfile,
+    mockBatteries: [
+      { deviceId: "bat-1", serial: "GW-100", label: "Batería A", voltage: voltages[0] },
+      { deviceId: "bat-2", serial: "GW-100", label: "Batería B", voltage: voltages[1] },
+      { deviceId: "bat-3", serial: "GW-100", label: "Batería C", voltage: voltages[2] },
+    ],
+  };
+}
+
+const groupedVoltageFlowPresets = {
+  oneFail: buildGroupedVoltageScenario([3.19, 3.45, 3.45]),
+  twoFail: buildGroupedVoltageScenario([3.19, 3.29, 3.45]),
+  threeFail: buildGroupedVoltageScenario([3.19, 3.29, 3.19]),
+  partialRecovery: buildGroupedVoltageScenario([3.45, 3.29, 3.19]),
+  allOk: buildGroupedVoltageScenario([3.45, 3.45, 3.45]),
+} as const;
+
 function isRuleUsingMockData(rule: AlertRule | Partial<AlertRule>) {
   if ((rule.dataSource ?? "mock") === "mock") return true;
   const params = (rule.params ?? {}) as Record<string, unknown>;
@@ -722,6 +750,12 @@ export default function AlertasPage() {
     setTestParamsText(JSON.stringify({ ...(form.params ?? {}), ...preset }, null, 2));
   }, [activeType, form.params]);
 
+  const applyGroupedFlowPreset = useCallback((scenario: keyof typeof groupedVoltageFlowPresets) => {
+    const preset = { ...alertTypeConfig[activeType].defaults, ...groupedVoltageFlowPresets[scenario] };
+    setForm((prev) => ({ ...prev, params: { ...(prev.params ?? {}), ...preset } }));
+    setTestParamsText(JSON.stringify({ ...(form.params ?? {}), ...preset }, null, 2));
+  }, [activeType, form.params]);
+
   return (
     <section className="space-y-6 text-slate-100">
       <div className="rounded-2xl border border-slate-800 bg-gradient-to-r from-slate-900 to-slate-950 p-5">
@@ -866,6 +900,18 @@ export default function AlertasPage() {
               </div>
               {activeType.startsWith("battery_voltage_") ? (
                 <p className="text-xs text-cyan-300">Para reglas de voltaje en mock usa <code>mockBatteries[].voltage</code> por dispositivo (V). Ejemplo: 3.29, 3.19, 3.45.</p>
+              ) : null}
+              {activeType.startsWith("battery_voltage_") && form.scope?.mode === "grouped" ? (
+                <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                  <p className="text-xs text-slate-300">Presets grouped multi-dispositivo (A/B/C) para validar ciclo completo:</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => applyGroupedFlowPreset("oneFail")}>Preset grouped: 1 en fallo</button>
+                    <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => applyGroupedFlowPreset("twoFail")}>Preset grouped: 2 en fallo</button>
+                    <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => applyGroupedFlowPreset("threeFail")}>Preset grouped: 3 en fallo</button>
+                    <button className="rounded-lg border border-violet-700 px-3 py-1.5 text-xs text-violet-200 hover:bg-violet-900/30" onClick={() => applyGroupedFlowPreset("partialRecovery")}>Preset grouped: recuperación parcial</button>
+                    <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => applyGroupedFlowPreset("allOk")}>Preset grouped: todo OK</button>
+                  </div>
+                </div>
               ) : null}
               <textarea
                 className={`${inputClass} min-h-40 font-mono text-xs`}
