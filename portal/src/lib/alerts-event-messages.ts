@@ -184,3 +184,56 @@ export function buildEventPresentation(event: AlertEvent, ruleType?: AlertRuleTy
   }
   return presentation;
 }
+
+
+type GroupedAffectedItem = {
+  key: string;
+  label: string;
+  voltage: number | null;
+};
+
+function toEntityKey(item: { label?: string; deviceId?: string; serial?: string }, idx: number) {
+  return item.deviceId ?? item.serial ?? item.label ?? `affected-${idx}`;
+}
+
+function safeLabel(item: { label?: string; deviceId?: string; serial?: string }, idx: number) {
+  return cleanText(item.label ?? item.deviceId ?? item.serial, `Equipo ${idx + 1}`);
+}
+
+export function buildGroupedAffectedItems(event: AlertEvent): GroupedAffectedItem[] {
+  if (event.scope.mode !== "grouped") return [];
+  const debug = asDebug(event.debug);
+  const lowDevices = Array.isArray(debug.lowDevices) ? (debug.lowDevices as AffectedDevice[]) : [];
+  const criticalDevices = Array.isArray(debug.criticalDevices) ? (debug.criticalDevices as AffectedDevice[]) : [];
+  const voltageByKey = new Map<string, number>();
+
+  for (const item of [...criticalDevices, ...lowDevices]) {
+    if (typeof item.batteryVoltage !== "number" || !Number.isFinite(item.batteryVoltage)) continue;
+    const key = toEntityKey(item, 0);
+    voltageByKey.set(key, item.batteryVoltage);
+  }
+
+  return event.affected.map((item, idx) => {
+    const key = toEntityKey(item, idx);
+    return {
+      key,
+      label: safeLabel(item, idx),
+      voltage: voltageByKey.get(key) ?? null,
+    };
+  });
+}
+
+function formatAffectedItem(item: GroupedAffectedItem) {
+  return item.voltage != null ? `${item.label} (${item.voltage.toFixed(2)} V)` : item.label;
+}
+
+export function buildGroupedAffectedSummary(event: AlertEvent): string | null {
+  if (event.scope.mode !== "grouped") return null;
+  const items = buildGroupedAffectedItems(event);
+  const count = items.length;
+  if (!count) return null;
+
+  if (count === 1) return formatAffectedItem(items[0]);
+  if (count <= 3) return `${count} equipos afectados: ${items.map((item) => formatAffectedItem(item)).join(", ")}`;
+  return `${count} equipos en fallo`;
+}

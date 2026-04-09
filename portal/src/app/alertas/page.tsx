@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { buildEventPresentation } from "@/lib/alerts-event-messages";
+import { buildEventPresentation, buildGroupedAffectedItems, buildGroupedAffectedSummary } from "@/lib/alerts-event-messages";
 import {
   ALERT_DATA_SOURCES,
   ALERT_ROLES,
@@ -451,6 +451,8 @@ export default function AlertasPage() {
   const [form, setForm] = useState<Partial<AlertRule>>(emptyRule);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [discovery, setDiscovery] = useState<DiscoveryState>({ tenants: [], clients: [], sites: [], serials: [], devices: [] });
+  const [expandedGroupedEvents, setExpandedGroupedEvents] = useState<Record<string, boolean>>({});
+  const [showAllGroupedEvents, setShowAllGroupedEvents] = useState<Record<string, boolean>>({});
 
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" }), [token]);
 
@@ -979,6 +981,13 @@ export default function AlertasPage() {
           {eventsForView.length === 0 ? <p className="rounded-lg border border-dashed border-slate-700 p-6 text-sm text-slate-400">Sin eventos para el filtro seleccionado.</p> : null}
           {eventsForView.map((event) => {
             const presentation = buildEventPresentation(event, ruleTypeById.get(event.ruleId));
+            const groupedSummary = buildGroupedAffectedSummary(event);
+            const groupedItems = buildGroupedAffectedItems(event);
+            const isExpanded = Boolean(expandedGroupedEvents[event.id]);
+            const showAll = Boolean(showAllGroupedEvents[event.id]);
+            const hasMany = groupedItems.length > 10;
+            const previewCount = hasMany ? 5 : groupedItems.length;
+            const visibleItems = showAll ? groupedItems : groupedItems.slice(0, previewCount);
             return (
               <div key={event.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -992,6 +1001,39 @@ export default function AlertasPage() {
                 <p className="mt-1 text-sm text-slate-300">{presentation.headline}</p>
                 <p className="text-xs text-slate-500">{event.timestamp} · {event.scope.tenant}/{event.scope.client ?? "-"}/{event.scope.site ?? "-"}</p>
                 <p className="mt-1 text-xs text-slate-400">{presentation.subheadline} · Regla: {event.ruleId}</p>
+                {groupedSummary ? (
+                  <div className="mt-1 text-xs text-slate-300">
+                    <p>{groupedSummary}</p>
+                    <button
+                      type="button"
+                      className="mt-1 text-cyan-300 hover:text-cyan-200"
+                      onClick={() => setExpandedGroupedEvents((prev) => ({ ...prev, [event.id]: !prev[event.id] }))}
+                    >
+                      {isExpanded ? "Ocultar detalles" : "Ver detalles"}
+                    </button>
+                    {isExpanded ? (
+                      <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/60 p-2">
+                        <ul className="space-y-1">
+                          {visibleItems.map((item) => (
+                            <li key={item.key}>- {item.voltage != null ? `${item.label} (${item.voltage.toFixed(2)} V)` : item.label}</li>
+                          ))}
+                        </ul>
+                        {hasMany && !showAll ? (
+                          <div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
+                            <span>Mostrando {visibleItems.length} de {groupedItems.length}</span>
+                            <button
+                              type="button"
+                              className="text-cyan-300 hover:text-cyan-200"
+                              onClick={() => setShowAllGroupedEvents((prev) => ({ ...prev, [event.id]: true }))}
+                            >
+                              Ver todos
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button disabled={event.status !== "active"} className="rounded-lg border border-blue-700 px-3 py-1.5 text-xs text-blue-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "ack")}>Marcar ACK</button>
                   <button disabled={event.status === "resolved"} className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "resolve")}>Marcar resuelto</button>
