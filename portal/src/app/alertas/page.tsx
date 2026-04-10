@@ -421,6 +421,22 @@ function eventStatusClass(status: AlertEvent["status"]) {
   return "bg-amber-900/60 text-amber-200";
 }
 
+function eventSeverityClass(severity: AlertEvent["severity"]) {
+  if (severity === "critical") return "bg-rose-950/70 text-rose-200 border border-rose-700/60";
+  return "bg-amber-950/70 text-amber-200 border border-amber-700/60";
+}
+
+function modeBadgeClass(mode: AlertEvent["scope"]["mode"]) {
+  if (mode === "per_device") return "bg-violet-950/60 text-violet-200 border border-violet-700/60";
+  return "bg-cyan-950/60 text-cyan-200 border border-cyan-700/60";
+}
+
+function summaryToneClass(primarySummary: string) {
+  if (primarySummary.toLowerCase().includes("sin cambios")) return "border-slate-700/70 bg-slate-950/40 text-slate-200";
+  if (primarySummary.toLowerCase().includes("recuper")) return "border-emerald-700/60 bg-emerald-950/25 text-emerald-100";
+  return "border-cyan-700/60 bg-cyan-950/20 text-cyan-100";
+}
+
 function normalizeEventForView(event: AlertEvent) {
   const fallbackAffected = Array.isArray((event.debug as Record<string, unknown> | undefined)?.affected)
     ? ((event.debug as Record<string, unknown>).affected as Array<{ serial?: string; deviceId?: string; label?: string }>)
@@ -1120,35 +1136,44 @@ export default function AlertasPage() {
             const hasMany = groupedItems.length > 10;
             const previewCount = hasMany ? 5 : groupedItems.length;
             const visibleItems = showAll ? groupedItems : groupedItems.slice(0, previewCount);
+            const isCritical = event.severity === "critical";
+            const isResolved = event.status === "resolved";
+            const eventStatusLabel = event.status === "active" ? "Activo" : event.status === "resolved" ? "Resuelto" : "ACK";
             return (
-              <div key={event.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-medium">{event.ruleName}</p>
+              <article key={event.id} className="rounded-2xl border border-slate-800/90 bg-slate-900/70 p-4 shadow-sm shadow-slate-950/40">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="text-base font-semibold tracking-tight text-slate-100">{presentation.headline}</p>
+                    <p className="text-xs text-slate-500">{event.timestamp} · {event.scope.tenant}/{event.scope.client ?? "-"}/{event.scope.site ?? "-"}</p>
+                  </div>
                   <div className="flex flex-wrap gap-2 text-xs">
-                    <span className={`rounded-full px-2 py-1 ${eventStatusClass(event.status)}`}>{event.status}</span>
-                    <span className="rounded-full bg-amber-900/60 px-2 py-1 text-amber-200">{event.severity}</span>
-                    <span className="rounded-full bg-slate-800 px-2 py-1 text-slate-200">{event.scope.mode}</span>
+                    <span className={`rounded-full px-2.5 py-1 font-medium ${eventStatusClass(event.status)}`}>{isResolved ? "✓ " : "• "}{eventStatusLabel}</span>
+                    <span className={`rounded-full px-2.5 py-1 font-medium ${eventSeverityClass(event.severity)}`}>{isCritical ? "▲ Crítico" : "△ Warning"}</span>
+                    <span className={`rounded-full px-2.5 py-1 font-medium ${modeBadgeClass(event.scope.mode)}`}>{event.scope.mode === "grouped" ? "≋ grouped" : "◉ per_device"}</span>
                   </div>
                 </div>
-                <p className="mt-1 text-sm text-slate-300">{presentation.headline}</p>
-                <p className="text-xs text-slate-500">{event.timestamp} · {event.scope.tenant}/{event.scope.client ?? "-"}/{event.scope.site ?? "-"}</p>
-                <p className="text-xs text-slate-400">{buildEventOriginTrace(event)}</p>
-                <p className="mt-1 text-xs text-slate-400">{presentation.subheadline} · Regla: {event.ruleId}</p>
+                <div className="mt-3 rounded-xl border border-slate-800/80 bg-slate-950/40 p-3">
+                  <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Contexto</p>
+                  <p className="mt-1 text-sm font-medium text-slate-200">{event.ruleName}</p>
+                  <p className="mt-1 text-xs text-slate-400">{presentation.subheadline}</p>
+                  <p className="mt-1 text-xs text-slate-500">{buildEventOriginTrace(event)} · Regla: {event.ruleId}</p>
+                </div>
                 {groupedSummary ? (
-                  <div className="mt-1 text-xs text-slate-300">
-                    <p>{groupedSummary}</p>
+                  <div className="mt-3 rounded-xl border border-slate-800/80 bg-slate-950/40 p-3 text-xs text-slate-300">
+                    <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Detalle de alcance</p>
+                    <p className="mt-1">{groupedSummary}</p>
                     <button
                       type="button"
-                      className="mt-1 text-cyan-300 hover:text-cyan-200"
+                      className="mt-2 rounded-md border border-cyan-800/70 px-2 py-1 text-[11px] font-medium text-cyan-300 hover:bg-cyan-900/20 hover:text-cyan-200"
                       onClick={() => setExpandedGroupedEvents((prev) => ({ ...prev, [event.id]: !prev[event.id] }))}
                     >
                       {isExpanded ? "Ocultar detalles" : "Ver detalles"}
                     </button>
                     {isExpanded ? (
-                      <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/60 p-2">
-                        <ul className="space-y-1">
+                      <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/70 p-2">
+                        <ul className="space-y-1.5">
                           {visibleItems.map((item) => (
-                            <li key={item.key}>- {item.voltage != null ? `${item.label} (${item.voltage.toFixed(2)} V)` : item.label}</li>
+                            <li key={item.key} className="rounded-md bg-slate-900/70 px-2 py-1 text-slate-300">• {item.voltage != null ? `${item.label} (${item.voltage.toFixed(2)} V)` : item.label}</li>
                           ))}
                         </ul>
                         {hasMany && !showAll ? (
@@ -1168,11 +1193,15 @@ export default function AlertasPage() {
                   </div>
                 ) : null}
                 {event.scope.mode === "grouped" && event.status === "active" ? (
-                  <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/50 p-2 text-xs text-slate-300">
-                    <p className="font-medium text-slate-200">Cambios en última evaluación</p>
-                    {addedLastEval.length ? <p>Nuevos equipos en estado crítico: {formatTraceList(addedLastEval)}</p> : null}
-                    {removedLastEval.length ? <p>Equipos recuperados en esta evaluación: {formatTraceList(removedLastEval)}</p> : null}
-                    {!addedLastEval.length && !removedLastEval.length ? <p>Sin cambios respecto a la última evaluación.</p> : null}
+                  <div className="mt-3 rounded-xl border border-slate-800/80 bg-slate-950/50 p-3 text-xs text-slate-300">
+                    <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">Cambios en última evaluación</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {addedLastEval.length ? <span className="rounded-full border border-rose-700/60 bg-rose-950/30 px-2 py-1 text-[11px] text-rose-200">Nuevos: {addedLastEval.length}</span> : null}
+                      {removedLastEval.length ? <span className="rounded-full border border-emerald-700/60 bg-emerald-950/30 px-2 py-1 text-[11px] text-emerald-200">Recuperados: {removedLastEval.length}</span> : null}
+                      {!addedLastEval.length && !removedLastEval.length ? <span className="rounded-full border border-slate-700 bg-slate-900/80 px-2 py-1 text-[11px] text-slate-300">Sin cambios</span> : null}
+                    </div>
+                    {addedLastEval.length ? <p className="mt-2">Nuevos equipos en estado crítico: {formatTraceList(addedLastEval)}</p> : null}
+                    {removedLastEval.length ? <p className="mt-1">Equipos recuperados en esta evaluación: {formatTraceList(removedLastEval)}</p> : null}
                   </div>
                 ) : null}
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -1180,7 +1209,7 @@ export default function AlertasPage() {
                   <button disabled={event.status === "resolved"} className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "resolve")}>Marcar resuelto</button>
                   <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => deleteEvent(event.id)}>Eliminar</button>
                 </div>
-              </div>
+              </article>
             );
           })}
         </div>
@@ -1200,37 +1229,50 @@ export default function AlertasPage() {
             {runningNow ? "Ejecutando..." : "Ejecutar evaluación ahora"}
           </button>
           {runFeedback ? (
-            <div className="rounded-xl border border-emerald-700/60 bg-emerald-950/30 p-4 md:col-span-2 xl:col-span-3">
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-emerald-100">{runFeedback.primarySummary}</p>
-                <p className="text-xs text-emerald-200">{runFeedback.contextSummary}</p>
-                <p className="text-xs text-emerald-300">Ejecución {runFeedback.ranAt} · {runFeedback.evaluated} evaluadas · {runFeedback.fired} disparadas · {runFeedback.resolved} resueltas</p>
+            <div className={`rounded-2xl border p-4 md:col-span-2 xl:col-span-3 ${summaryToneClass(runFeedback.primarySummary)}`}>
+              <div className="space-y-2">
+                <p className="text-base font-semibold">{runFeedback.primarySummary}</p>
+                <p className="text-sm opacity-90">{runFeedback.contextSummary}</p>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <span className="rounded-full border border-current/30 bg-black/10 px-2 py-1">Evaluadas: {runFeedback.evaluated}</span>
+                  <span className="rounded-full border border-current/30 bg-black/10 px-2 py-1">Nuevas: {runFeedback.fired}</span>
+                  <span className="rounded-full border border-current/30 bg-black/10 px-2 py-1">Resueltas: {runFeedback.resolved}</span>
+                  <span className="rounded-full border border-current/30 bg-black/10 px-2 py-1">Ejecución: {runFeedback.ranAt}</span>
+                </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => setShowRunDetail((prev) => !prev)}>
-                  {showRunDetail ? "Ocultar detalle" : "Ver detalle de esta ejecución"}
+                <button className="rounded-lg border border-current/40 px-3 py-1.5 text-xs font-medium hover:bg-black/10" onClick={() => setShowRunDetail((prev) => !prev)}>
+                  {showRunDetail ? "Ocultar detalle de ejecución" : "Ver detalle de ejecución"}
                 </button>
-                <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => setTab("events")}>
+                <button className="rounded-lg border border-current/40 px-3 py-1.5 text-xs font-medium hover:bg-black/10" onClick={() => setTab("events")}>
                 Ver eventos generados
                 </button>
               </div>
               {showRunDetail ? (
-                <div className="mt-3 space-y-2 text-xs text-emerald-200">
+                <div className="mt-3 rounded-xl border border-current/25 bg-black/10 p-3">
+                  <p className="text-[11px] uppercase tracking-[0.12em] opacity-75">Detalle operativo grouped</p>
+                  <div className="mt-2 space-y-2 text-xs">
                   {runFeedback.groupedOperational.map((item, idx) => {
                     const currentlyFailing = [...item.stillFailing, ...item.addedFailures];
                     const hasChanges = item.addedFailures.length || item.removedFailures.length || currentlyFailing.length;
                     if (!hasChanges) return null;
                     return (
-                      <div key={`${item.ruleName}-${idx}`} className="rounded-lg border border-emerald-800/50 bg-emerald-950/20 p-3">
+                      <div key={`${item.ruleName}-${idx}`} className="rounded-lg border border-current/25 bg-black/10 p-3">
                         <p className="font-medium">{item.ruleName} · {(item.site ?? "site-sin-definir")} · {(item.gateway ?? "gateway-sin-definir")}</p>
-                        <p className="mt-1"><span className="text-emerald-100">Actualmente en fallo:</span> {formatTraceList(currentlyFailing)}</p>
-                        {item.addedFailures.length ? <p><span className="text-emerald-100">Nuevos en esta evaluación:</span> {formatTraceList(item.addedFailures)}</p> : null}
-                        {item.removedFailures.length ? <p><span className="text-emerald-100">Recuperados en esta evaluación:</span> {formatTraceList(item.removedFailures)}</p> : null}
-                        {!item.addedFailures.length && !item.removedFailures.length ? <p>Sin cambios respecto a la última evaluación.</p> : null}
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          <span className="rounded-full border border-current/30 px-2 py-0.5 text-[11px]">En fallo: {currentlyFailing.length}</span>
+                          <span className="rounded-full border border-current/30 px-2 py-0.5 text-[11px]">Nuevos: {item.addedFailures.length}</span>
+                          <span className="rounded-full border border-current/30 px-2 py-0.5 text-[11px]">Recuperados: {item.removedFailures.length}</span>
+                        </div>
+                        <p className="mt-2"><span className="opacity-90">Actualmente en fallo:</span> {formatTraceList(currentlyFailing)}</p>
+                        {item.addedFailures.length ? <p className="mt-1"><span className="opacity-90">Nuevos en esta evaluación:</span> {formatTraceList(item.addedFailures)}</p> : null}
+                        {item.removedFailures.length ? <p className="mt-1"><span className="opacity-90">Recuperados en esta evaluación:</span> {formatTraceList(item.removedFailures)}</p> : null}
+                        {!item.addedFailures.length && !item.removedFailures.length ? <p className="mt-1">Sin cambios respecto a la última evaluación.</p> : null}
                       </div>
                     );
                   })}
-                  {runFeedback.groupedOperational.length === 0 ? <p>No se recibieron cambios agrupados detallados en esta ejecución.</p> : null}
+                  {runFeedback.groupedOperational.length === 0 ? <p className="text-xs opacity-85">No se recibieron cambios agrupados detallados en esta ejecución.</p> : null}
+                  </div>
                 </div>
               ) : null}
             </div>
