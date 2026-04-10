@@ -126,6 +126,20 @@ function getEntityKey(item: AffectedItem, idx = 0) {
   return item.deviceId ?? item.serial ?? item.label ?? `entity-${idx}`;
 }
 
+function buildEntityMapFromFailureEvents(events: AlertEvent[]) {
+  const map = new Map<string, AffectedItem>();
+  let fallbackIdx = 0;
+  for (const event of events) {
+    const affectedItems = event.affected?.length ? event.affected : [{ label: `entity-${fallbackIdx}` }];
+    for (const item of affectedItems) {
+      const key = getEntityKey(item, fallbackIdx);
+      map.set(key, item);
+      fallbackIdx += 1;
+    }
+  }
+  return map;
+}
+
 type EntityTrace = {
   label: string;
   deviceId?: string;
@@ -457,11 +471,7 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
       simulatedEvents = [];
     }
   } else {
-    const currentMap = new Map<string, AffectedItem>();
-    for (const [idx, event] of failureEvents.entries()) {
-      const item = event.affected[0] ?? { label: `entity-${idx}` };
-      currentMap.set(getEntityKey(item, idx), item);
-    }
+    const currentMap = buildEntityMapFromFailureEvents(failureEvents);
     const now = nowIso();
     const previouslyFailingKeys = Object.entries(prevEntityState).filter(([, value]) => value.status === "fail").map(([key]) => key);
     const knownKeys = new Set<string>([
@@ -547,11 +557,7 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
     const key = getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx);
     entityLastNotifiedAt[key] = markNow;
   }
-  const currentEntityMap = new Map<string, AffectedItem>();
-  for (const [idx, event] of failureEvents.entries()) {
-    const item = event.affected[0] ?? { label: `entity-${idx}` };
-    currentEntityMap.set(getEntityKey(item, idx), item);
-  }
+  const currentEntityMap = buildEntityMapFromFailureEvents(failureEvents);
   const prevEntityMap = new Map<string, AffectedItem>();
   for (const key of prevEntityKeys) {
     const meta = prevEntityMeta[key];
