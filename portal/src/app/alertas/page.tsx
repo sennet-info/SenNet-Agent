@@ -776,10 +776,10 @@ export default function AlertasPage() {
       };
       const summaryParts: string[] = [];
       if (groupedChanges.newActive > 0) summaryParts.push("Nuevo grupo activo detectado");
-      if (groupedChanges.added > 0) summaryParts.push(`Grupo actualizado (+${groupedChanges.added} equipo${groupedChanges.added === 1 ? "" : "s"} en fallo)`);
-      if (groupedChanges.removed > 0) summaryParts.push(`Grupo actualizado (-${groupedChanges.removed} equipo${groupedChanges.removed === 1 ? "" : "s"} recuperado${groupedChanges.removed === 1 ? "" : "s"})`);
+      if (groupedChanges.added > 0) summaryParts.push(`Nuevos equipos en estado crítico: ${groupedChanges.added}`);
+      if (groupedChanges.removed > 0) summaryParts.push(`Equipos recuperados en esta evaluación: ${groupedChanges.removed}`);
       if (groupedChanges.recovered > 0) summaryParts.push("Grupo recuperado");
-      if (!summaryParts.length) summaryParts.push("Sin cambios en el grupo activo");
+      if (!summaryParts.length) summaryParts.push("Sin cambios respecto a la última evaluación");
       const groupedOperational = Array.isArray(data?.groupedOperational) ? data.groupedOperational : [];
       setRunFeedback({
         evaluated: Number(data?.evaluated ?? 0),
@@ -1146,9 +1146,9 @@ export default function AlertasPage() {
                 {event.scope.mode === "grouped" && event.status === "active" ? (
                   <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/50 p-2 text-xs text-slate-300">
                     <p className="font-medium text-slate-200">Cambios en última evaluación</p>
-                    {addedLastEval.length ? <p>Nuevos en fallo: {formatTraceList(addedLastEval)}</p> : null}
-                    {removedLastEval.length ? <p>Recuperados: {formatTraceList(removedLastEval)}</p> : null}
-                    {!addedLastEval.length && !removedLastEval.length ? <p>Sin cambios</p> : null}
+                    {addedLastEval.length ? <p>Nuevos equipos en estado crítico: {formatTraceList(addedLastEval)}</p> : null}
+                    {removedLastEval.length ? <p>Equipos recuperados en esta evaluación: {formatTraceList(removedLastEval)}</p> : null}
+                    {!addedLastEval.length && !removedLastEval.length ? <p>Sin cambios respecto a la última evaluación.</p> : null}
                   </div>
                 ) : null}
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -1190,9 +1190,9 @@ export default function AlertasPage() {
                       <div key={`${item.ruleName}-${idx}`} className="rounded-lg border border-emerald-800/50 bg-emerald-950/20 p-2">
                         <p className="font-medium">{item.ruleName} · {(item.site ?? "site-sin-definir")} · {(item.gateway ?? "gateway-sin-definir")}</p>
                         <p>Actualmente en fallo: {formatTraceList(currentlyFailing)}</p>
-                        {item.addedFailures.length ? <p>Nuevos en esta evaluación: {formatTraceList(item.addedFailures)}</p> : null}
-                        {item.removedFailures.length ? <p>Recuperados en esta evaluación: {formatTraceList(item.removedFailures)}</p> : null}
-                        {!item.addedFailures.length && !item.removedFailures.length ? <p>Sin cambios en el grupo activo.</p> : null}
+                        {item.addedFailures.length ? <p>Nuevos equipos en estado crítico: {formatTraceList(item.addedFailures)}</p> : null}
+                        {item.removedFailures.length ? <p>Equipos recuperados en esta evaluación: {formatTraceList(item.removedFailures)}</p> : null}
+                        {!item.addedFailures.length && !item.removedFailures.length ? <p>Sin cambios respecto a la última evaluación.</p> : null}
                       </div>
                     );
                   })}

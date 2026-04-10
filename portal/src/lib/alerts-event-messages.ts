@@ -57,7 +57,7 @@ function groupedMessage(event: AlertEvent, ruleType: AlertRuleType | undefined, 
 
   if (ruleType === "heartbeat") {
     if (event.status === "resolved") {
-      return { headline: "Comunicación recuperada", subheadline: "Recuperación confirmada" };
+      return { headline: "Comunicación restablecida", subheadline: "Todos los equipos volvieron a reportar" };
     }
     const staleCount = getStaleCount(event, debug);
     return {
@@ -69,29 +69,29 @@ function groupedMessage(event: AlertEvent, ruleType: AlertRuleType | undefined, 
   if (ruleType?.startsWith("battery_voltage_critical")) {
     if (event.status === "resolved") {
       return {
-        headline: "Grupo recuperado: voltajes fuera de zona crítica",
-        subheadline: "Recuperación confirmada",
+        headline: "Grupo recuperado",
+        subheadline: "Todos los equipos han vuelto a valores normales",
       };
     }
     const threshold = typeof debug.criticalVoltage === "number" ? debug.criticalVoltage.toFixed(2) : null;
     return {
-      headline: "Voltaje crítico detectado",
+      headline: "Baterías en estado crítico",
       subheadline: threshold
         ? `${formatCountLabel(count, "equipo", "equipos")} por debajo de ${threshold} V`
-        : `${formatCountLabel(count, "equipo", "equipos")} en voltaje crítico`,
+        : `${formatCountLabel(count, "equipo", "equipos")} afectados`,
     };
   }
 
   if (ruleType?.startsWith("battery_voltage_low")) {
     if (event.status === "resolved") {
       return {
-        headline: "Voltajes en rango",
-        subheadline: "Recuperación confirmada",
+        headline: "Grupo recuperado",
+        subheadline: "Todos los equipos han vuelto a valores normales",
       };
     }
     const threshold = typeof debug.thresholdVoltage === "number" ? debug.thresholdVoltage.toFixed(2) : null;
     return {
-      headline: "Voltaje bajo detectado",
+      headline: "Baterías fuera de rango",
       subheadline: threshold
         ? `${formatCountLabel(count, "equipo", "equipos")} por debajo de ${threshold} V`
         : `${formatCountLabel(count, "equipo", "equipos")} con voltaje bajo`,
@@ -100,10 +100,10 @@ function groupedMessage(event: AlertEvent, ruleType: AlertRuleType | undefined, 
 
   if (ruleType?.startsWith("battery_low")) {
     if (event.status === "resolved") {
-      return { headline: "Baterías en rango", subheadline: "Recuperación confirmada" };
+      return { headline: "Grupo recuperado", subheadline: "Todos los equipos han vuelto a valores normales" };
     }
     return {
-      headline: "Batería baja detectada",
+      headline: "Nivel de batería bajo en el grupo",
       subheadline: `${formatCountLabel(count, "equipo", "equipos")} por debajo del umbral`,
     };
   }
@@ -133,28 +133,28 @@ function perDeviceMessage(event: AlertEvent, ruleType: AlertRuleType | undefined
   if (ruleType?.startsWith("battery_voltage_critical")) {
     const voltage = resolveVoltage(event, debug);
     if (event.status === "resolved") {
-      return { headline: `${device} recuperada: voltaje en rango`, subheadline: "Condición crítica normalizada" };
+      return { headline: `${device} recuperada`, subheadline: "Voltaje de nuevo en rango normal" };
     }
     return {
-      headline: voltage != null ? `${device} en voltaje crítico: ${voltage.toFixed(2)} V` : `${device} en voltaje crítico`,
-      subheadline: "Revisión prioritaria recomendada",
+      headline: `${device} en estado crítico`,
+      subheadline: voltage != null ? `Voltaje actual: ${voltage.toFixed(2)} V` : "Revisión prioritaria recomendada",
     };
   }
 
   if (ruleType?.startsWith("battery_voltage_low")) {
     const voltage = resolveVoltage(event, debug);
     if (event.status === "resolved") {
-      return { headline: `${device} recuperada: voltaje en rango`, subheadline: "Condición de bajo voltaje normalizada" };
+      return { headline: `${device} recuperada`, subheadline: "Voltaje de nuevo en rango normal" };
     }
     return {
-      headline: voltage != null ? `${device} con voltaje bajo: ${voltage.toFixed(2)} V` : `${device} con voltaje bajo`,
-      subheadline: "Monitorear tendencia de descarga",
+      headline: `${device} fuera de rango`,
+      subheadline: voltage != null ? `Voltaje actual: ${voltage.toFixed(2)} V` : "Monitorear tendencia de descarga",
     };
   }
 
   if (ruleType?.startsWith("battery_low")) {
     if (event.status === "resolved") {
-      return { headline: `${device} recuperada: batería en rango`, subheadline: "Nivel de batería normalizado" };
+      return { headline: `${device} recuperada`, subheadline: "Nivel de batería de nuevo en rango normal" };
     }
     return { headline: `${device} con batería baja`, subheadline: "Revisar autonomía disponible" };
   }
@@ -264,7 +264,7 @@ export function buildGroupedAffectedSummary(event: AlertEvent): string | null {
     return `${count} equipos recuperados`;
   }
 
-  if (count === 1) return formatAffectedItem(items[0]);
+  if (count === 1) return `${formatAffectedItem(items[0])} afectado`;
   if (count <= 3) return `${count} equipos afectados: ${items.map((item) => formatAffectedItem(item)).join(", ")}`;
   return `${count} equipos en fallo`;
 }
