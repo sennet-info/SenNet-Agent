@@ -52,8 +52,11 @@ def _label_from_mode(mode: str, days: Optional[int] = None):
 def resolve_report_time(payload: Any, now: Optional[datetime] = None) -> ResolvedReportTime:
     reference = now or datetime.now().astimezone()
     tzinfo = reference.tzinfo
-
     raw_mode = (getattr(payload, "range_mode", None) or "").strip() or None
+    if not raw_mode:
+        raw_flux = (getattr(payload, "range_flux", None) or "").strip()
+        if raw_flux in MODE_ALIASES:
+            raw_mode = raw_flux
     mode = MODE_ALIASES.get(raw_mode or "", "last_n_days")
 
     inferred_last_days = None
