@@ -28,8 +28,23 @@ def _month_section_title(site, period_start, period_end, global_end):
     return f"{site} - {title}"
 
 
-def _compute_prev_range(start_dt, end_dt):
-    """Calcula el rango anterior equivalente: mismo número de días, justo antes."""
+def _compute_prev_range(start_dt, end_dt, range_mode=None):
+    """Calcula el rango anterior.
+    - Para modos mensuales: devuelve el mes anterior completo.
+    - Para N dias: mismo numero de dias justo antes.
+    """
+    from calendar import monthrange
+    if range_mode in ("month_to_date", "previous_full_month"):
+        # Mes anterior completo
+        prev_month = start_dt.month - 1 if start_dt.month > 1 else 12
+        prev_year  = start_dt.year if start_dt.month > 1 else start_dt.year - 1
+        last_day   = monthrange(prev_year, prev_month)[1]
+        import pytz
+        tz = start_dt.tzinfo or pytz.UTC
+        prev_start = start_dt.replace(year=prev_year, month=prev_month, day=1, hour=0, minute=0, second=0)
+        prev_end   = start_dt.replace(year=prev_year, month=prev_month, day=last_day, hour=23, minute=59, second=59)
+        return prev_start, prev_end
+    # Default: mismo numero de dias justo antes
     delta = end_dt - start_dt
     return start_dt - delta, start_dt
 
@@ -150,6 +165,7 @@ def generate_report_pdf(
         prev_start_dt, prev_end_dt = _compute_prev_range(
             pd.Timestamp(start_dt).to_pydatetime(),
             pd.Timestamp(end_dt).to_pydatetime(),
+            range_mode=range_mode,
         )
 
     final_report_data = {period["section"]: {} for period in periods}
