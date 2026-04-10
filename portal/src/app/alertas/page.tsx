@@ -61,6 +61,22 @@ function formatTraceList(traces: EntityRunTrace[]) {
   return `${traces.length} equipos (${preview}...)`;
 }
 
+function buildPrimaryRunSummary(groupedChanges: GroupedRunChanges, fired: number, resolved: number) {
+  if (groupedChanges.recovered > 0) return "Grupo recuperado";
+  if (groupedChanges.newActive > 0) return "Nuevo grupo activo detectado";
+  if (groupedChanges.added > 0 && groupedChanges.removed > 0) {
+    return `Grupo activo actualizado (+${groupedChanges.added} / -${groupedChanges.removed})`;
+  }
+  if (groupedChanges.added > 0) {
+    return `${groupedChanges.added} equipo${groupedChanges.added === 1 ? "" : "s"} nuevo${groupedChanges.added === 1 ? "" : "s"} en estado crítico`;
+  }
+  if (groupedChanges.removed > 0) {
+    return `${groupedChanges.removed} equipo${groupedChanges.removed === 1 ? "" : "s"} recuperado${groupedChanges.removed === 1 ? "" : "s"}`;
+  }
+  if (fired > 0 || resolved > 0) return "Ejecución completada con cambios";
+  return "Sin cambios respecto a la última evaluación";
+}
+
 type AlertTypeConfig = {
   label: string;
   description: string;
@@ -509,7 +525,8 @@ export default function AlertasPage() {
   const [saving, setSaving] = useState(false);
   const [testingRuleId, setTestingRuleId] = useState<string | null>(null);
   const [runningNow, setRunningNow] = useState(false);
-  const [runFeedback, setRunFeedback] = useState<{ evaluated: number; fired: number; resolved: number; groupedChanges: GroupedRunChanges; groupedOperational: Array<{ ruleName: string; site?: string; gateway?: string; addedFailures: EntityRunTrace[]; removedFailures: EntityRunTrace[]; stillFailing: EntityRunTrace[]; nowOk: EntityRunTrace[] }>; summary: string; ranAt: string } | null>(null);
+  const [runFeedback, setRunFeedback] = useState<{ evaluated: number; fired: number; resolved: number; groupedChanges: GroupedRunChanges; groupedOperational: Array<{ ruleName: string; site?: string; gateway?: string; addedFailures: EntityRunTrace[]; removedFailures: EntityRunTrace[]; stillFailing: EntityRunTrace[]; nowOk: EntityRunTrace[] }>; summary: string; primarySummary: string; contextSummary: string; ranAt: string } | null>(null);
+  const [showRunDetail, setShowRunDetail] = useState(false);
   const [validationResult, setValidationResult] = useState<AlertValidationDebug | null>(null);
   const [testParamsText, setTestParamsText] = useState("{}");
   const [form, setForm] = useState<Partial<AlertRule>>(emptyRule);
@@ -780,7 +797,11 @@ export default function AlertasPage() {
       if (groupedChanges.removed > 0) summaryParts.push(`Equipos recuperados en esta evaluación: ${groupedChanges.removed}`);
       if (groupedChanges.recovered > 0) summaryParts.push("Grupo recuperado");
       if (!summaryParts.length) summaryParts.push("Sin cambios respecto a la última evaluación");
-      const groupedOperational = Array.isArray(data?.groupedOperational) ? data.groupedOperational : [];
+      const groupedOperational: Array<{ ruleName: string; site?: string; gateway?: string; addedFailures: EntityRunTrace[]; removedFailures: EntityRunTrace[]; stillFailing: EntityRunTrace[]; nowOk: EntityRunTrace[] }> = Array.isArray(data?.groupedOperational) ? data.groupedOperational : [];
+      const firstWithContext = groupedOperational.find((item) => item.site || item.gateway || item.ruleName);
+      const contextSummary = firstWithContext
+        ? `${firstWithContext.ruleName} · ${firstWithContext.site ?? "site-sin-definir"} · ${firstWithContext.gateway ?? "gateway-sin-definir"}`
+        : "Sin contexto agrupado en esta ejecución";
       setRunFeedback({
         evaluated: Number(data?.evaluated ?? 0),
         fired: Number(data?.fired ?? 0),
@@ -788,8 +809,11 @@ export default function AlertasPage() {
         groupedChanges,
         groupedOperational,
         summary: summaryParts.join(" · "),
+        primarySummary: buildPrimaryRunSummary(groupedChanges, Number(data?.fired ?? 0), Number(data?.resolved ?? 0)),
+        contextSummary,
         ranAt: new Date().toISOString(),
       });
+      setShowRunDetail(false);
       await loadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error ejecutando motor");
@@ -1177,30 +1201,38 @@ export default function AlertasPage() {
           </button>
           {runFeedback ? (
             <div className="rounded-xl border border-emerald-700/60 bg-emerald-950/30 p-4 md:col-span-2 xl:col-span-3">
-              <p className="text-sm text-emerald-100">
-                Ejecución real completada ({runFeedback.ranAt}): <b>{runFeedback.evaluated}</b> regla(s) evaluada(s), <b>{runFeedback.fired}</b> disparada(s), <b>{runFeedback.resolved}</b> resuelta(s) · {runFeedback.summary}.
-              </p>
-              {runFeedback.groupedOperational.some((item) => item.addedFailures.length || item.removedFailures.length || item.stillFailing.length) ? (
-                <div className="mt-2 space-y-2 text-xs text-emerald-200">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-emerald-100">{runFeedback.primarySummary}</p>
+                <p className="text-xs text-emerald-200">{runFeedback.contextSummary}</p>
+                <p className="text-xs text-emerald-300">Ejecución {runFeedback.ranAt} · {runFeedback.evaluated} evaluadas · {runFeedback.fired} disparadas · {runFeedback.resolved} resueltas</p>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => setShowRunDetail((prev) => !prev)}>
+                  {showRunDetail ? "Ocultar detalle" : "Ver detalle de esta ejecución"}
+                </button>
+                <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => setTab("events")}>
+                Ver eventos generados
+                </button>
+              </div>
+              {showRunDetail ? (
+                <div className="mt-3 space-y-2 text-xs text-emerald-200">
                   {runFeedback.groupedOperational.map((item, idx) => {
                     const currentlyFailing = [...item.stillFailing, ...item.addedFailures];
                     const hasChanges = item.addedFailures.length || item.removedFailures.length || currentlyFailing.length;
                     if (!hasChanges) return null;
                     return (
-                      <div key={`${item.ruleName}-${idx}`} className="rounded-lg border border-emerald-800/50 bg-emerald-950/20 p-2">
+                      <div key={`${item.ruleName}-${idx}`} className="rounded-lg border border-emerald-800/50 bg-emerald-950/20 p-3">
                         <p className="font-medium">{item.ruleName} · {(item.site ?? "site-sin-definir")} · {(item.gateway ?? "gateway-sin-definir")}</p>
-                        <p>Actualmente en fallo: {formatTraceList(currentlyFailing)}</p>
-                        {item.addedFailures.length ? <p>Nuevos equipos en estado crítico: {formatTraceList(item.addedFailures)}</p> : null}
-                        {item.removedFailures.length ? <p>Equipos recuperados en esta evaluación: {formatTraceList(item.removedFailures)}</p> : null}
+                        <p className="mt-1"><span className="text-emerald-100">Actualmente en fallo:</span> {formatTraceList(currentlyFailing)}</p>
+                        {item.addedFailures.length ? <p><span className="text-emerald-100">Nuevos en esta evaluación:</span> {formatTraceList(item.addedFailures)}</p> : null}
+                        {item.removedFailures.length ? <p><span className="text-emerald-100">Recuperados en esta evaluación:</span> {formatTraceList(item.removedFailures)}</p> : null}
                         {!item.addedFailures.length && !item.removedFailures.length ? <p>Sin cambios respecto a la última evaluación.</p> : null}
                       </div>
                     );
                   })}
+                  {runFeedback.groupedOperational.length === 0 ? <p>No se recibieron cambios agrupados detallados en esta ejecución.</p> : null}
                 </div>
               ) : null}
-              <button className="mt-2 rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => setTab("events")}>
-                Ver eventos generados
-              </button>
             </div>
           ) : null}
         </div>
