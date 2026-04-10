@@ -91,23 +91,28 @@ class Visualizer:
                           color=main_c, alpha=0.92, label="Actual", zorder=3)
             if has_prev:
                 from datetime import datetime as _dt, timedelta as _td
+                def _nth_dow_in_month(year, month, dow, n):
+                    first = _dt(year, month, 1)
+                    da = (dow - first.weekday()) % 7
+                    result = first + _td(days=da) + _td(weeks=n-1)
+                    return result if result.month == month else None
                 pv = dict(prev_data)
                 data_keys = sorted(data.keys())
-                prev_keys = sorted(pv.keys())
                 pvals = []
-                if data_keys and prev_keys:
-                    start_cur  = _dt.strptime(data_keys[0], "%Y-%m-%d")
-                    start_prev = _dt.strptime(prev_keys[0], "%Y-%m-%d")
-                    for k in data_keys:
-                        try:
-                            dt_cur = _dt.strptime(k, "%Y-%m-%d")
-                            dow_cur = dt_cur.weekday()
-                            week_cur = (dt_cur - start_cur).days // 7
-                            week_start_prev = start_prev + _td(days=week_cur * 7)
-                            target_prev = week_start_prev + _td(days=(dow_cur - week_start_prev.weekday()) % 7)
-                            pvals.append(float(pv.get(target_prev.strftime("%Y-%m-%d"), 0)))
-                        except:
-                            pvals.append(0)
+                for k in data_keys:
+                    try:
+                        dt = _dt.strptime(k, "%Y-%m-%d")
+                        dow = dt.weekday()
+                        first_same = _dt(dt.year, dt.month, 1)
+                        da = (dow - first_same.weekday()) % 7
+                        n = (dt - (first_same + _td(days=da))).days // 7 + 1
+                        pm = dt.month - 1 if dt.month > 1 else 12
+                        py = dt.year if dt.month > 1 else dt.year - 1
+                        target = _nth_dow_in_month(py, pm, dow, n)
+                        pk = target.strftime("%Y-%m-%d") if target else None
+                        pvals.append(float(pv.get(pk, 0)) if pk else 0)
+                    except:
+                        pvals.append(0)
                 ax.bar(x+w/2, pvals, width=w, color=light_c, alpha=0.85,
                        edgecolor=main_c, linewidth=0.5, label="Mes anterior", zorder=3)
                 ax.legend(fontsize=7, framealpha=0.95, loc="upper center", bbox_to_anchor=(0.5, 1.13), ncol=2, edgecolor="#DEE2E6")
