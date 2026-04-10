@@ -8,7 +8,7 @@ const rulesPath = path.join(dataDir, "alerts_rules.json");
 const eventsPath = path.join(dataDir, "alerts_events.json");
 const statePath = path.join(dataDir, "alerts_state.json");
 const lockPath = path.join(dataDir, ".alerts.lock");
-const retentionDays = Number(process.env.ALERTS_EVENTS_RETENTION_DAYS ?? 30);
+const retentionDays = Number(process.env.ALERTS_EVENTS_RETENTION_DAYS ?? 7);
 const maxEvents = Number(process.env.ALERTS_EVENTS_MAX ?? 2000);
 
 async function withLock<T>(fn: () => Promise<T>): Promise<T> {
@@ -152,6 +152,48 @@ export async function resolveActiveEventsByRule(ruleId: string, entityKeys: stri
       await atomicWrite(eventsPath, applyRetention(next));
     }
     return { updatedCount };
+  });
+}
+
+export async function upsertGroupedActiveEvent(nextEvent: AlertEvent) {
+  return withLock(async () => {
+    const events = await readJson<AlertEvent[]>(eventsPath, []);
+    let keptOne = false;
+    let targetId: string | null = null;
+    const next = events.map((event) => {
+      if (event.ruleId !== nextEvent.ruleId || event.status !== "active" || event.scope?.mode !== "grouped") return event;
+      if (!keptOne) {
+        keptOne = true;
+        targetId = event.id;
+        return {
+          ...event,
+          timestamp: nextEvent.timestamp,
+          severity: nextEvent.severity,
+          ruleName: nextEvent.ruleName,
+          scope: nextEvent.scope,
+          affected: nextEvent.affected,
+          message: nextEvent.message,
+          details: nextEvent.details,
+          debug: nextEvent.debug,
+        };
+      }
+      return { ...event, status: "resolved" as const };
+    });
+
+    const merged = keptOne ? next : [nextEvent, ...next];
+    await atomicWrite(eventsPath, applyRetention(merged));
+    return { updated: keptOne, eventId: targetId ?? nextEvent.id };
+  });
+}
+
+export async function clearActiveGroupedEventsByRule(ruleId: string) {
+  return withLock(async () => {
+    const events = await readJson<AlertEvent[]>(eventsPath, []);
+    const next = events.filter((event) => !(event.ruleId === ruleId && event.status === "active" && event.scope?.mode === "grouped"));
+    if (next.length !== events.length) {
+      await atomicWrite(eventsPath, applyRetention(next));
+    }
+    return { removed: events.length - next.length };
   });
 }
 

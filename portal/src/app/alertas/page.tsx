@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { buildEventOriginTrace, buildEventPresentation, buildGroupedAffectedItems, buildGroupedAffectedSummary } from "@/lib/alerts-event-messages";
 import {
   ALERT_DATA_SOURCES,
   ALERT_ROLES,
@@ -23,6 +24,58 @@ type DiscoveryState = {
   serials: string[];
   devices: string[];
 };
+
+type GroupedRunChanges = {
+  newActive: number;
+  added: number;
+  removed: number;
+  increasedBy: number;
+  decreasedBy: number;
+  recovered: number;
+  unchanged: number;
+};
+
+type EntityRunTrace = {
+  label: string;
+  serial?: string;
+  deviceId?: string;
+  site?: string;
+  previousVoltage?: number;
+  currentVoltage?: number;
+};
+
+function formatVoltageTransition(trace: EntityRunTrace) {
+  if (typeof trace.previousVoltage === "number" || typeof trace.currentVoltage === "number") {
+    const prev = typeof trace.previousVoltage === "number" ? trace.previousVoltage.toFixed(2) : "-";
+    const curr = typeof trace.currentVoltage === "number" ? trace.currentVoltage.toFixed(2) : "-";
+    return ` (${prev} V -> ${curr} V)`;
+  }
+  return "";
+}
+
+function formatTraceList(traces: EntityRunTrace[]) {
+  if (!traces.length) return "ninguno";
+  if (traces.length === 1) return `${traces[0].label}${formatVoltageTransition(traces[0])}`;
+  if (traces.length <= 3) return traces.map((trace) => `${trace.label}${formatVoltageTransition(trace)}`).join(", ");
+  const preview = traces.slice(0, 3).map((trace) => trace.label).join(", ");
+  return `${traces.length} equipos (${preview}...)`;
+}
+
+function buildPrimaryRunSummary(groupedChanges: GroupedRunChanges, fired: number, resolved: number) {
+  if (groupedChanges.recovered > 0) return "Grupo recuperado";
+  if (groupedChanges.newActive > 0) return "Nuevo grupo activo detectado";
+  if (groupedChanges.added > 0 && groupedChanges.removed > 0) {
+    return `Grupo activo actualizado (+${groupedChanges.added} / -${groupedChanges.removed})`;
+  }
+  if (groupedChanges.added > 0) {
+    return `${groupedChanges.added} equipo${groupedChanges.added === 1 ? "" : "s"} nuevo${groupedChanges.added === 1 ? "" : "s"} en estado crítico`;
+  }
+  if (groupedChanges.removed > 0) {
+    return `${groupedChanges.removed} equipo${groupedChanges.removed === 1 ? "" : "s"} recuperado${groupedChanges.removed === 1 ? "" : "s"}`;
+  }
+  if (fired > 0 || resolved > 0) return "Ejecución completada con cambios";
+  return "Sin cambios respecto a la última evaluación";
+}
 
 type AlertTypeConfig = {
   label: string;
@@ -328,6 +381,34 @@ const typeMockPresets: Record<AlertRuleType, { low: Record<string, unknown>; cri
   irregular_interval: { low: { mockObservedGapMinutes: 12 }, ok: { mockObservedGapMinutes: 5 } },
 };
 
+const groupedBatteryProfile = {
+  chemistry: "li-ion",
+  nominalVoltage: 3.6,
+  thresholds: { low: 3.3, critical: 3.2, cutoff: 3.2 },
+};
+
+function buildGroupedVoltageScenario(voltages: [number, number, number]) {
+  return {
+    warningVoltage: 3.3,
+    criticalVoltage: 3.2,
+    cutoffVoltage: 3.2,
+    batteryProfile: groupedBatteryProfile,
+    mockBatteries: [
+      { deviceId: "bat-1", serial: "GW-100", label: "Batería A", voltage: voltages[0] },
+      { deviceId: "bat-2", serial: "GW-100", label: "Batería B", voltage: voltages[1] },
+      { deviceId: "bat-3", serial: "GW-100", label: "Batería C", voltage: voltages[2] },
+    ],
+  };
+}
+
+const groupedVoltageFlowPresets = {
+  oneFail: buildGroupedVoltageScenario([3.19, 3.45, 3.45]),
+  twoFail: buildGroupedVoltageScenario([3.19, 3.29, 3.45]),
+  threeFail: buildGroupedVoltageScenario([3.19, 3.19, 3.19]),
+  partialRecovery: buildGroupedVoltageScenario([3.45, 3.29, 3.19]),
+  allOk: buildGroupedVoltageScenario([3.45, 3.45, 3.45]),
+} as const;
+
 function isRuleUsingMockData(rule: AlertRule | Partial<AlertRule>) {
   if ((rule.dataSource ?? "mock") === "mock") return true;
   const params = (rule.params ?? {}) as Record<string, unknown>;
@@ -354,23 +435,6 @@ function normalizeEventForView(event: AlertEvent) {
       mode: event.scope?.mode ?? "grouped",
     },
   };
-}
-
-function buildGroupedRecoveryMessage(event: AlertEvent, ruleType?: AlertRuleType) {
-  if (!(event.status === "resolved" && event.scope.mode === "grouped")) return event.message;
-  if (ruleType?.startsWith("battery_voltage_critical")) return "Grupo recuperado: ya no hay baterías en nivel crítico";
-  if (ruleType?.startsWith("battery_voltage_low")) return "Grupo recuperado: ya no hay baterías por debajo del umbral";
-  if (ruleType?.startsWith("battery_low")) return "Grupo recuperado: baterías nuevamente en rango";
-  if (ruleType === "heartbeat") return "Grupo recuperado: equipos reportando nuevamente";
-  if (event.message.toLowerCase().startsWith("recuperación de grupo")) return "Grupo recuperado: condición normalizada";
-  return event.message;
-}
-
-function buildAffectedLine(event: AlertEvent) {
-  if (event.status === "resolved" && event.scope.mode === "grouped") {
-    return "Grupo recuperado · Equipos actualmente en alarma: 0";
-  }
-  return `Afectados: ${event.affected.length}`;
 }
 
 function FieldBlock({ label, help, children }: { label: string; help?: string; children: React.ReactNode }) {
@@ -461,12 +525,15 @@ export default function AlertasPage() {
   const [saving, setSaving] = useState(false);
   const [testingRuleId, setTestingRuleId] = useState<string | null>(null);
   const [runningNow, setRunningNow] = useState(false);
-  const [runFeedback, setRunFeedback] = useState<{ evaluated: number; fired: number; ranAt: string } | null>(null);
+  const [runFeedback, setRunFeedback] = useState<{ evaluated: number; fired: number; resolved: number; groupedChanges: GroupedRunChanges; groupedOperational: Array<{ ruleName: string; site?: string; gateway?: string; addedFailures: EntityRunTrace[]; removedFailures: EntityRunTrace[]; stillFailing: EntityRunTrace[]; nowOk: EntityRunTrace[] }>; summary: string; primarySummary: string; contextSummary: string; ranAt: string } | null>(null);
+  const [showRunDetail, setShowRunDetail] = useState(false);
   const [validationResult, setValidationResult] = useState<AlertValidationDebug | null>(null);
   const [testParamsText, setTestParamsText] = useState("{}");
   const [form, setForm] = useState<Partial<AlertRule>>(emptyRule);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [discovery, setDiscovery] = useState<DiscoveryState>({ tenants: [], clients: [], sites: [], serials: [], devices: [] });
+  const [expandedGroupedEvents, setExpandedGroupedEvents] = useState<Record<string, boolean>>({});
+  const [showAllGroupedEvents, setShowAllGroupedEvents] = useState<Record<string, boolean>>({});
 
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" }), [token]);
 
@@ -715,11 +782,38 @@ export default function AlertasPage() {
       const resp = await fetch("/api/alerts/run", { method: "POST", headers: authHeaders });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(data?.detail ?? "No se pudo ejecutar el motor");
+      const groupedChanges: GroupedRunChanges = {
+        newActive: Number(data?.groupedChanges?.newActive ?? 0),
+        added: Number(data?.groupedChanges?.added ?? data?.groupedChanges?.increasedBy ?? 0),
+        removed: Number(data?.groupedChanges?.removed ?? data?.groupedChanges?.decreasedBy ?? 0),
+        increasedBy: Number(data?.groupedChanges?.increasedBy ?? 0),
+        decreasedBy: Number(data?.groupedChanges?.decreasedBy ?? 0),
+        recovered: Number(data?.groupedChanges?.recovered ?? 0),
+        unchanged: Number(data?.groupedChanges?.unchanged ?? 0),
+      };
+      const summaryParts: string[] = [];
+      if (groupedChanges.newActive > 0) summaryParts.push("Nuevo grupo activo detectado");
+      if (groupedChanges.added > 0) summaryParts.push(`Nuevos equipos en estado crítico: ${groupedChanges.added}`);
+      if (groupedChanges.removed > 0) summaryParts.push(`Equipos recuperados en esta evaluación: ${groupedChanges.removed}`);
+      if (groupedChanges.recovered > 0) summaryParts.push("Grupo recuperado");
+      if (!summaryParts.length) summaryParts.push("Sin cambios respecto a la última evaluación");
+      const groupedOperational: Array<{ ruleName: string; site?: string; gateway?: string; addedFailures: EntityRunTrace[]; removedFailures: EntityRunTrace[]; stillFailing: EntityRunTrace[]; nowOk: EntityRunTrace[] }> = Array.isArray(data?.groupedOperational) ? data.groupedOperational : [];
+      const firstWithContext = groupedOperational.find((item) => item.site || item.gateway || item.ruleName);
+      const contextSummary = firstWithContext
+        ? `${firstWithContext.ruleName} · ${firstWithContext.site ?? "site-sin-definir"} · ${firstWithContext.gateway ?? "gateway-sin-definir"}`
+        : "Sin contexto agrupado en esta ejecución";
       setRunFeedback({
         evaluated: Number(data?.evaluated ?? 0),
         fired: Number(data?.fired ?? 0),
+        resolved: Number(data?.resolved ?? 0),
+        groupedChanges,
+        groupedOperational,
+        summary: summaryParts.join(" · "),
+        primarySummary: buildPrimaryRunSummary(groupedChanges, Number(data?.fired ?? 0), Number(data?.resolved ?? 0)),
+        contextSummary,
         ranAt: new Date().toISOString(),
       });
+      setShowRunDetail(false);
       await loadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error ejecutando motor");
@@ -732,6 +826,12 @@ export default function AlertasPage() {
     const presetBucket = typeMockPresets[activeType];
     const selected = mode === "critical" ? (presetBucket.critical ?? presetBucket.low) : presetBucket[mode];
     const preset = { ...alertTypeConfig[activeType].defaults, ...selected };
+    setForm((prev) => ({ ...prev, params: { ...(prev.params ?? {}), ...preset } }));
+    setTestParamsText(JSON.stringify({ ...(form.params ?? {}), ...preset }, null, 2));
+  }, [activeType, form.params]);
+
+  const applyGroupedFlowPreset = useCallback((scenario: keyof typeof groupedVoltageFlowPresets) => {
+    const preset = { ...alertTypeConfig[activeType].defaults, ...groupedVoltageFlowPresets[scenario] };
     setForm((prev) => ({ ...prev, params: { ...(prev.params ?? {}), ...preset } }));
     setTestParamsText(JSON.stringify({ ...(form.params ?? {}), ...preset }, null, 2));
   }, [activeType, form.params]);
@@ -881,6 +981,18 @@ export default function AlertasPage() {
               {activeType.startsWith("battery_voltage_") ? (
                 <p className="text-xs text-cyan-300">Para reglas de voltaje en mock usa <code>mockBatteries[].voltage</code> por dispositivo (V). Ejemplo: 3.29, 3.19, 3.45.</p>
               ) : null}
+              {activeType.startsWith("battery_voltage_") && form.scope?.mode === "grouped" ? (
+                <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                  <p className="text-xs text-slate-300">Presets grouped multi-dispositivo (A/B/C) para validar ciclo completo:</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => applyGroupedFlowPreset("oneFail")}>Preset grouped: 1 en fallo</button>
+                    <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => applyGroupedFlowPreset("twoFail")}>Preset grouped: 2 en fallo</button>
+                    <button className="rounded-lg border border-cyan-700 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" onClick={() => applyGroupedFlowPreset("threeFail")}>Preset grouped: 3 en fallo</button>
+                    <button className="rounded-lg border border-violet-700 px-3 py-1.5 text-xs text-violet-200 hover:bg-violet-900/30" onClick={() => applyGroupedFlowPreset("partialRecovery")}>Preset grouped: recuperación parcial</button>
+                    <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => applyGroupedFlowPreset("allOk")}>Preset grouped: todo OK</button>
+                  </div>
+                </div>
+              ) : null}
               <textarea
                 className={`${inputClass} min-h-40 font-mono text-xs`}
                 value={testParamsText}
@@ -992,8 +1104,23 @@ export default function AlertasPage() {
             <button className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800" onClick={() => clearEvents("resolved")}>Limpiar resueltos (seguro)</button>
             <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => clearEvents("all")}>Borrar todos los eventos</button>
           </div>
+          <p className="text-xs text-slate-400">Los eventos resueltos tienen retención automática limitada (por defecto 7 días, configurable por <code>ALERTS_EVENTS_RETENTION_DAYS</code>) y también pueden limpiarse manualmente.</p>
           {eventsForView.length === 0 ? <p className="rounded-lg border border-dashed border-slate-700 p-6 text-sm text-slate-400">Sin eventos para el filtro seleccionado.</p> : null}
-          {eventsForView.map((event) => (
+          {eventsForView.map((event) => {
+            const presentation = buildEventPresentation(event, ruleTypeById.get(event.ruleId));
+            const groupedSummary = buildGroupedAffectedSummary(event);
+            const groupedItems = buildGroupedAffectedItems(event);
+            const operationalDiff = (event.debug as Record<string, unknown> | undefined)?.operationalDiff as
+              | { addedFailures?: EntityRunTrace[]; removedFailures?: EntityRunTrace[]; stillFailing?: EntityRunTrace[] }
+              | undefined;
+            const addedLastEval = Array.isArray(operationalDiff?.addedFailures) ? operationalDiff.addedFailures : [];
+            const removedLastEval = Array.isArray(operationalDiff?.removedFailures) ? operationalDiff.removedFailures : [];
+            const isExpanded = Boolean(expandedGroupedEvents[event.id]);
+            const showAll = Boolean(showAllGroupedEvents[event.id]);
+            const hasMany = groupedItems.length > 10;
+            const previewCount = hasMany ? 5 : groupedItems.length;
+            const visibleItems = showAll ? groupedItems : groupedItems.slice(0, previewCount);
+            return (
               <div key={event.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-medium">{event.ruleName}</p>
@@ -1003,16 +1130,59 @@ export default function AlertasPage() {
                     <span className="rounded-full bg-slate-800 px-2 py-1 text-slate-200">{event.scope.mode}</span>
                   </div>
                 </div>
-                <p className="mt-1 text-sm text-slate-300">{buildGroupedRecoveryMessage(event, ruleTypeById.get(event.ruleId))}</p>
+                <p className="mt-1 text-sm text-slate-300">{presentation.headline}</p>
                 <p className="text-xs text-slate-500">{event.timestamp} · {event.scope.tenant}/{event.scope.client ?? "-"}/{event.scope.site ?? "-"}</p>
-                <p className="mt-1 text-xs text-slate-400">{buildAffectedLine(event)} · Regla: {event.ruleId}</p>
+                <p className="text-xs text-slate-400">{buildEventOriginTrace(event)}</p>
+                <p className="mt-1 text-xs text-slate-400">{presentation.subheadline} · Regla: {event.ruleId}</p>
+                {groupedSummary ? (
+                  <div className="mt-1 text-xs text-slate-300">
+                    <p>{groupedSummary}</p>
+                    <button
+                      type="button"
+                      className="mt-1 text-cyan-300 hover:text-cyan-200"
+                      onClick={() => setExpandedGroupedEvents((prev) => ({ ...prev, [event.id]: !prev[event.id] }))}
+                    >
+                      {isExpanded ? "Ocultar detalles" : "Ver detalles"}
+                    </button>
+                    {isExpanded ? (
+                      <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/60 p-2">
+                        <ul className="space-y-1">
+                          {visibleItems.map((item) => (
+                            <li key={item.key}>- {item.voltage != null ? `${item.label} (${item.voltage.toFixed(2)} V)` : item.label}</li>
+                          ))}
+                        </ul>
+                        {hasMany && !showAll ? (
+                          <div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
+                            <span>Mostrando {visibleItems.length} de {groupedItems.length}</span>
+                            <button
+                              type="button"
+                              className="text-cyan-300 hover:text-cyan-200"
+                              onClick={() => setShowAllGroupedEvents((prev) => ({ ...prev, [event.id]: true }))}
+                            >
+                              Ver todos
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                {event.scope.mode === "grouped" && event.status === "active" ? (
+                  <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950/50 p-2 text-xs text-slate-300">
+                    <p className="font-medium text-slate-200">Cambios en última evaluación</p>
+                    {addedLastEval.length ? <p>Nuevos equipos en estado crítico: {formatTraceList(addedLastEval)}</p> : null}
+                    {removedLastEval.length ? <p>Equipos recuperados en esta evaluación: {formatTraceList(removedLastEval)}</p> : null}
+                    {!addedLastEval.length && !removedLastEval.length ? <p>Sin cambios respecto a la última evaluación.</p> : null}
+                  </div>
+                ) : null}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button disabled={event.status !== "active"} className="rounded-lg border border-blue-700 px-3 py-1.5 text-xs text-blue-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "ack")}>Marcar ACK</button>
                   <button disabled={event.status === "resolved"} className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 disabled:opacity-50" onClick={() => updateEventStatus(event.id, "resolve")}>Marcar resuelto</button>
                   <button className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-900/40" onClick={() => deleteEvent(event.id)}>Eliminar</button>
                 </div>
               </div>
-          ))}
+            );
+          })}
         </div>
       ) : null}
 
@@ -1031,12 +1201,38 @@ export default function AlertasPage() {
           </button>
           {runFeedback ? (
             <div className="rounded-xl border border-emerald-700/60 bg-emerald-950/30 p-4 md:col-span-2 xl:col-span-3">
-              <p className="text-sm text-emerald-100">
-                Ejecución real completada ({runFeedback.ranAt}): <b>{runFeedback.evaluated}</b> regla(s) evaluada(s), <b>{runFeedback.fired}</b> disparada(s).
-              </p>
-              <button className="mt-2 rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => setTab("events")}>
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-emerald-100">{runFeedback.primarySummary}</p>
+                <p className="text-xs text-emerald-200">{runFeedback.contextSummary}</p>
+                <p className="text-xs text-emerald-300">Ejecución {runFeedback.ranAt} · {runFeedback.evaluated} evaluadas · {runFeedback.fired} disparadas · {runFeedback.resolved} resueltas</p>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => setShowRunDetail((prev) => !prev)}>
+                  {showRunDetail ? "Ocultar detalle" : "Ver detalle de esta ejecución"}
+                </button>
+                <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" onClick={() => setTab("events")}>
                 Ver eventos generados
-              </button>
+                </button>
+              </div>
+              {showRunDetail ? (
+                <div className="mt-3 space-y-2 text-xs text-emerald-200">
+                  {runFeedback.groupedOperational.map((item, idx) => {
+                    const currentlyFailing = [...item.stillFailing, ...item.addedFailures];
+                    const hasChanges = item.addedFailures.length || item.removedFailures.length || currentlyFailing.length;
+                    if (!hasChanges) return null;
+                    return (
+                      <div key={`${item.ruleName}-${idx}`} className="rounded-lg border border-emerald-800/50 bg-emerald-950/20 p-3">
+                        <p className="font-medium">{item.ruleName} · {(item.site ?? "site-sin-definir")} · {(item.gateway ?? "gateway-sin-definir")}</p>
+                        <p className="mt-1"><span className="text-emerald-100">Actualmente en fallo:</span> {formatTraceList(currentlyFailing)}</p>
+                        {item.addedFailures.length ? <p><span className="text-emerald-100">Nuevos en esta evaluación:</span> {formatTraceList(item.addedFailures)}</p> : null}
+                        {item.removedFailures.length ? <p><span className="text-emerald-100">Recuperados en esta evaluación:</span> {formatTraceList(item.removedFailures)}</p> : null}
+                        {!item.addedFailures.length && !item.removedFailures.length ? <p>Sin cambios respecto a la última evaluación.</p> : null}
+                      </div>
+                    );
+                  })}
+                  {runFeedback.groupedOperational.length === 0 ? <p>No se recibieron cambios agrupados detallados en esta ejecución.</p> : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>

@@ -87,7 +87,45 @@ Presets recomendados:
 - **Demos / QA**: `dataSource=mock` + presets + Validar.
 - **Producción**: `dataSource=real` + ejecución por scheduler/motor + revisión de retención.
 
-## 8) Visualización de recoveries (grouped vs per_device)
+## 8) Mensajes dinámicos en UI (grouped vs per_device)
 
-- En `grouped` y estado `resolved`, la UI muestra copy operacional (ej. “Grupo recuperado...”) y evita el texto confuso `Afectados: 0`.
-- En `per_device`, se mantiene el detalle por entidad afectada para seguimiento técnico.
+- La UI construye `headline/subheadline` semánticos por evento usando `ruleType + status + scope.mode + affected + debug`.
+- `grouped` prioriza copy operativo global (ej.: “Voltaje bajo detectado”, “Dispositivos sin comunicación”, “Voltajes en rango”).
+- `per_device` prioriza entidad puntual (ej.: “Batería A con voltaje bajo: 3.29 V”, “Sensor X volvió a comunicar”).
+- `active` comunica detección actual; `resolved` comunica recuperación; `ack` se muestra como seguimiento sin alterar motor.
+- Fallback histórico: si no hay datos suficientes para inferencia, se usa `event.message` original y se evita `undefined/null`.
+
+## 9) Flujo grouped multi-dispositivo (mock, 3 equipos)
+
+Para reglas `battery_voltage_*` en `scope.mode=grouped`, usa los nuevos presets de UI:
+- `Preset grouped: 1 en fallo`
+- `Preset grouped: 2 en fallo`
+- `Preset grouped: 3 en fallo`
+- `Preset grouped: recuperación parcial`
+- `Preset grouped: todo OK`
+
+Secuencia recomendada para validar ciclo completo:
+1. Aplicar `1 en fallo` + ejecutar evaluación real → debe existir 1 `ACTIVE grouped`.
+2. Aplicar `2 en fallo` + ejecutar evaluación real → debe seguir 1 `ACTIVE grouped` (sin duplicados) y resumen actualizado.
+3. Aplicar `3 en fallo` + ejecutar evaluación real → mismo `ACTIVE grouped`, resumen en 3 equipos.
+4. Aplicar `recuperación parcial` + ejecutar evaluación real → grouped sigue en `ACTIVE`.
+5. Aplicar `todo OK` + ejecutar evaluación real → desaparece de `Activos` y aparece en `Resueltos`.
+6. Volver a `1 en fallo` + ejecutar evaluación real → reaparece un `ACTIVE grouped` como nuevo ciclo.
+
+Notas:
+- En grouped, la UI muestra resumen compacto y permite `Ver detalles` para drill-down de equipos/voltaje.
+- En listas grandes, se limita vista inicial y permite `Ver todos`.
+- La tarjeta de evento muestra traza de origen: `site · gateway/serial` para lectura rápida de operación.
+- En `grouped resolved`, el resumen de afectados se interpreta como recuperación (`Equipos recuperados: ...`).
+
+## 10) Retención de resueltos y trazabilidad operativa
+
+- Los eventos `active` se conservan mientras sigan activos.
+- Los eventos `resolved/ack` tienen retención automática limitada (default: **7 días**).
+- Puedes ajustar la retención con `ALERTS_EVENTS_RETENTION_DAYS`.
+- También puedes limpiar manualmente desde UI (`Limpiar resueltos` / `Borrar todos`).
+- Tras `Estado -> Ejecutar evaluación ahora`, la UI muestra un resumen operativo del cambio grouped:
+  - nuevo grupo activo
+  - incremento/decremento de equipos en fallo
+  - grupo recuperado
+  - sin cambios

@@ -83,7 +83,7 @@ export type AlertValidationDebug = {
   fired: boolean;
   message: string;
   evaluation_reason: string;
-  affected: Array<{ serial?: string; deviceId?: string; label?: string }>;
+  affected: Array<{ serial?: string; deviceId?: string; label?: string; batteryVoltage?: number }>;
   previous_state: {
     previous_ok: boolean;
     last_run_at?: string;
@@ -116,7 +116,7 @@ export type AlertEvent = {
   ruleId: string;
   ruleName: string;
   scope: AlertScope;
-  affected: Array<{ serial?: string; deviceId?: string; label?: string }>;
+  affected: Array<{ serial?: string; deviceId?: string; label?: string; batteryVoltage?: number }>;
   message: string;
   details?: string;
   debug?: Record<string, unknown>;

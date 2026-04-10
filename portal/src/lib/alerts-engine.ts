@@ -4,7 +4,7 @@ import { notifyForEvent, previewDelivery } from "@/lib/alerts-notify";
 import { filterSamplesByScope, normalizeEnergySamples } from "@/lib/alerts-energy-normalizer";
 import { getVoltageThresholds } from "@/lib/alerts-energy-profile";
 import { AlertDataSource, AlertEvent, AlertRule, AlertValidationDebug } from "@/lib/alerts-types";
-import { appendEvent, cleanupEventsWithRetention, getState, listRules, resolveActiveEventsByRule, saveRules, saveState } from "@/lib/alerts-store";
+import { appendEvent, cleanupEventsWithRetention, getState, listRules, resolveActiveEventsByRule, saveRules, saveState, upsertGroupedActiveEvent, clearActiveGroupedEventsByRule } from "@/lib/alerts-store";
 
 type BatterySample = {
   deviceId: string;
@@ -25,7 +25,7 @@ type RuleEvalResult = {
   typeSpecificDebug: Record<string, unknown>;
   affected: Array<{ serial?: string; deviceId?: string; label?: string }>;
 };
-type AffectedItem = { serial?: string; deviceId?: string; label?: string };
+type AffectedItem = { serial?: string; deviceId?: string; label?: string; batteryVoltage?: number };
 type EntityStateMap = Record<string, { status: "ok" | "fail"; lastChangeAt: string; meta?: AffectedItem }>;
 
 type AlertsDataAdapter = {
@@ -124,6 +124,40 @@ function buildEventsFromResult(rule: AlertRule, result: RuleEvalResult): AlertEv
 
 function getEntityKey(item: AffectedItem, idx = 0) {
   return item.deviceId ?? item.serial ?? item.label ?? `entity-${idx}`;
+}
+
+function buildEntityMapFromFailureEvents(events: AlertEvent[]) {
+  const map = new Map<string, AffectedItem>();
+  let fallbackIdx = 0;
+  for (const event of events) {
+    const affectedItems = event.affected?.length ? event.affected : [{ label: `entity-${fallbackIdx}` }];
+    for (const item of affectedItems) {
+      const key = getEntityKey(item, fallbackIdx);
+      map.set(key, item);
+      fallbackIdx += 1;
+    }
+  }
+  return map;
+}
+
+type EntityTrace = {
+  label: string;
+  deviceId?: string;
+  serial?: string;
+  site?: string;
+  previousVoltage?: number;
+  currentVoltage?: number;
+};
+
+function toTrace(item: AffectedItem | undefined, site: string | undefined, previousVoltage?: number, currentVoltage?: number): EntityTrace {
+  return {
+    label: item?.label ?? item?.deviceId ?? item?.serial ?? "Equipo",
+    deviceId: item?.deviceId,
+    serial: item?.serial,
+    site,
+    previousVoltage,
+    currentVoltage,
+  };
 }
 
 function buildRecoveryEvent(rule: AlertRule, item: AffectedItem, sourceMessage: string): AlertEvent {
@@ -291,8 +325,22 @@ async function evalRule(rule: AlertRule, adapter: AlertsDataAdapter): Promise<Ru
         evaluationReason: fired ? "Se detectó batería baja por voltaje real" : "Voltaje en rango",
         inputsRaw: { thresholdVoltage: threshold, criticalVoltage: p.criticalVoltage, dataSource, batteries: normalizedSamples.slice(0, 30) },
         inputsUsed: { thresholdVoltage: threshold, criticalVoltage, scopedBatteriesCount: scopedBatteries.length, lowCount: low.length, criticalCount: critical.length },
-        typeSpecificDebug: { kind: "battery_voltage", level: severityLevel, mode: isAll ? "ALL" : "ANY", lowDevices: low, criticalDevices: critical, dataSource, profile },
-        affected: low.map((item) => ({ serial: item.serial, deviceId: item.deviceId, label: item.label })),
+        typeSpecificDebug: {
+          kind: "battery_voltage",
+          level: severityLevel,
+          mode: isAll ? "ALL" : "ANY",
+          lowDevices: low,
+          criticalDevices: critical,
+          scopedDevices: scopedBatteries.map((item) => ({
+            serial: item.serial,
+            deviceId: item.deviceId,
+            label: item.label ?? item.deviceId,
+            batteryVoltage: item.voltage != null ? Number(item.voltage) : undefined,
+          })),
+          dataSource,
+          profile,
+        },
+        affected: low.map((item) => ({ serial: item.serial, deviceId: item.deviceId, label: item.label, batteryVoltage: item.batteryVoltage })),
       };
     }
 
@@ -372,6 +420,15 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
   let enteredFailKeys: string[] = [];
   let recoveredKeys: string[] = [];
   let currentEntityState: EntityStateMap = {};
+  const scopedDevicesForTrace = Array.isArray((result.typeSpecificDebug as Record<string, unknown> | undefined)?.scopedDevices)
+    ? ((result.typeSpecificDebug as Record<string, unknown>).scopedDevices as Array<Record<string, unknown>>)
+    : [];
+  const currentVoltagesByKey = new Map<string, number>();
+  for (const item of scopedDevicesForTrace) {
+    const key = String(item.deviceId ?? item.serial ?? item.label ?? "");
+    const voltage = Number(item.batteryVoltage);
+    if (key && Number.isFinite(voltage)) currentVoltagesByKey.set(key, voltage);
+  }
 
   if (rule.scope.mode === "grouped") {
     const shouldNotifyByEdge = rule.notifications.triggerMode === "edge" ? previousOk !== !result.fired : result.fired;
@@ -382,7 +439,31 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
 
     if (result.fired && shouldNotifyByEdge) simulatedEvents = failureEvents;
     if (!result.fired && !previousOk && shouldNotifyByEdge) {
-      simulatedEvents = [{ id: randomUUID(), timestamp: nowIso(), severity: rule.severity, ruleId: rule.id, ruleName: rule.name, scope: rule.scope, affected: fallbackAffectedFromScope(rule), message: `Recuperación de grupo: ${rule.name}`, details: "Condición de alerta recuperada", debug: { transition: "fail_to_ok", mode: "grouped" }, status: "resolved" }];
+      const recoveredFromState = prevEntityKeys.map((key) => prevEntityMeta[key]).filter(Boolean).map((item) => ({
+        ...item,
+        batteryVoltage: typeof item.batteryVoltage === "number" ? item.batteryVoltage : undefined,
+      }));
+      const recoveredEntitiesDetailed = prevEntityKeys.map((key) => ({
+        key,
+        label: prevEntityMeta[key]?.label ?? prevEntityMeta[key]?.deviceId ?? prevEntityMeta[key]?.serial ?? key,
+        deviceId: prevEntityMeta[key]?.deviceId,
+        serial: prevEntityMeta[key]?.serial,
+        previousVoltage: typeof prevEntityMeta[key]?.batteryVoltage === "number" ? prevEntityMeta[key]?.batteryVoltage : undefined,
+        currentVoltage: currentVoltagesByKey.get(key),
+      }));
+      simulatedEvents = [{
+        id: randomUUID(),
+        timestamp: nowIso(),
+        severity: rule.severity,
+        ruleId: rule.id,
+        ruleName: rule.name,
+        scope: rule.scope,
+        affected: recoveredFromState.length ? recoveredFromState : fallbackAffectedFromScope(rule),
+        message: `Recuperación de grupo: ${rule.name}`,
+        details: "Condición de alerta recuperada",
+        debug: { transition: "fail_to_ok", mode: "grouped", recoveredEntities: recoveredFromState, recoveredEntitiesDetailed },
+        status: "resolved",
+      }];
     }
     const isRecoveryEvent = simulatedEvents.some((event) => event.status === "resolved");
     if (simulatedEvents.length && !cooldownPass && !isRecoveryEvent) {
@@ -390,11 +471,7 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
       simulatedEvents = [];
     }
   } else {
-    const currentMap = new Map<string, AffectedItem>();
-    for (const [idx, event] of failureEvents.entries()) {
-      const item = event.affected[0] ?? { label: `entity-${idx}` };
-      currentMap.set(getEntityKey(item, idx), item);
-    }
+    const currentMap = buildEntityMapFromFailureEvents(failureEvents);
     const now = nowIso();
     const previouslyFailingKeys = Object.entries(prevEntityState).filter(([, value]) => value.status === "fail").map(([key]) => key);
     const knownKeys = new Set<string>([
@@ -453,33 +530,80 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
     would_notify: simulatedEvents.length > 0,
     suppressed_by: [...(simulatedEvents.length ? [] : ["edge_or_condition"]), ...(cooldownBlocked ? ["cooldown"] : [])],
     delivery_preview: simulatedEvents.length ? previewDelivery(rule) : undefined,
-    type_specific_debug: { ...result.typeSpecificDebug, enteredFailKeys, recoveredKeys, previousEntityState: prevEntityState, currentEntityState },
+    type_specific_debug: { ...result.typeSpecificDebug, enteredFailKeys, recoveredKeys, previousEntityState: prevEntityState, currentEntityState, addedFailures: [], removedFailures: [], stillFailing: [], nowOk: [] },
   };
 
   const createdEvents: AlertEvent[] = [];
   if (simulatedEvents.length > 0 && !manual) {
+    if (rule.scope.mode === "grouped" && simulatedEvents.some((event) => event.status === "active")) {
+      await resolveActiveEventsByRule(rule.id, []);
+    }
     for (const event of simulatedEvents) {
       const delivery = await notifyForEvent(rule, event);
-      const enrichedEvent: AlertEvent = { ...event, debug: { deliveryPreview: delivery, validationSummary: { fired: debugEnvelope.fired, message: debugEnvelope.message, reason: debugEnvelope.evaluation_reason, dataSource: getRuleDataSource(rule) } } };
+      const enrichedEvent: AlertEvent = { ...event, debug: { ...(event.debug ?? {}), deliveryPreview: delivery, validationSummary: { fired: debugEnvelope.fired, message: debugEnvelope.message, reason: debugEnvelope.evaluation_reason, dataSource: getRuleDataSource(rule) } } };
       await appendEvent(enrichedEvent);
       createdEvents.push(enrichedEvent);
     }
-    const recoveryKeys = createdEvents.filter((event) => event.status === "resolved").map((event, idx) => getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx));
-    if (recoveryKeys.length) await resolveActiveEventsByRule(rule.id, recoveryKeys);
+    const groupedResolved = createdEvents.some((event) => event.status === "resolved" && event.scope.mode === "grouped");
+    const recoveryKeys = createdEvents
+      .filter((event) => event.status === "resolved" && event.scope.mode !== "grouped")
+      .map((event, idx) => getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx));
+    if (groupedResolved) await clearActiveGroupedEventsByRule(rule.id);
+    else if (recoveryKeys.length) await resolveActiveEventsByRule(rule.id, recoveryKeys);
   }
-
   const markNow = nowIso();
   const entityLastNotifiedAt = { ...prevEntityLastNotifiedAt };
   for (const [idx, event] of createdEvents.entries()) {
     const key = getEntityKey(event.affected[0] ?? { label: `entity-${idx}` }, idx);
     entityLastNotifiedAt[key] = markNow;
   }
-  const currentEntityMap = new Map<string, AffectedItem>();
-  for (const [idx, event] of failureEvents.entries()) {
-    const item = event.affected[0] ?? { label: `entity-${idx}` };
-    currentEntityMap.set(getEntityKey(item, idx), item);
+  const currentEntityMap = buildEntityMapFromFailureEvents(failureEvents);
+  const prevEntityMap = new Map<string, AffectedItem>();
+  for (const key of prevEntityKeys) {
+    const meta = prevEntityMeta[key];
+    if (meta) prevEntityMap.set(key, meta);
+  }
+  const currentVoltages = currentVoltagesByKey;
+  const addedFailures: EntityTrace[] = [];
+  const removedFailures: EntityTrace[] = [];
+  const stillFailing: EntityTrace[] = [];
+  const nowOk: EntityTrace[] = [];
+  for (const [key, curr] of currentEntityMap.entries()) {
+    const prev = prevEntityMap.get(key);
+    const prevVoltage = typeof prev?.batteryVoltage === "number" ? prev.batteryVoltage : undefined;
+    const currVoltage = typeof curr?.batteryVoltage === "number" ? curr.batteryVoltage : currentVoltages.get(key);
+    if (!prev) addedFailures.push(toTrace(curr, rule.scope.site, prevVoltage, currVoltage));
+    else stillFailing.push(toTrace(curr, rule.scope.site, prevVoltage, currVoltage));
+  }
+  for (const [key, prev] of prevEntityMap.entries()) {
+    if (currentEntityMap.has(key)) continue;
+    const prevVoltage = typeof prev?.batteryVoltage === "number" ? prev.batteryVoltage : undefined;
+    const currVoltage = currentVoltages.get(key);
+    const trace = toTrace(prev, rule.scope.site, prevVoltage, currVoltage);
+    removedFailures.push(trace);
+    nowOk.push(trace);
+  }
+  if (!manual && rule.scope.mode === "grouped" && result.fired && failureEvents.length > 0) {
+    const baseEvent = failureEvents[0];
+    const groupedEvent: AlertEvent = {
+      ...baseEvent,
+      debug: {
+        ...(baseEvent.debug ?? {}),
+        operationalDiff: { addedFailures, removedFailures, stillFailing, nowOk },
+        validationSummary: { fired: debugEnvelope.fired, message: debugEnvelope.message, reason: debugEnvelope.evaluation_reason, dataSource: getRuleDataSource(rule) },
+      },
+    };
+    await upsertGroupedActiveEvent(groupedEvent);
   }
   const { next: prunedEntityState, nextNotified } = pruneEntityMap(currentEntityState, entityLastNotifiedAt);
+
+  debugEnvelope.type_specific_debug = {
+    ...debugEnvelope.type_specific_debug,
+    addedFailures,
+    removedFailures,
+    stillFailing,
+    nowOk,
+  };
 
   const updatedRule: AlertRule = {
     ...rule,
@@ -496,13 +620,49 @@ export async function evaluateRule(rule: AlertRule, manual = false) {
     updatedAt: markNow,
   };
 
-  return { updatedRule, createdEvents, createdEvent: createdEvents[0] ?? null, elapsed, fired: result.fired, message: result.message, debug: debugEnvelope, manual };
+  return {
+    updatedRule,
+    createdEvents,
+    createdEvent: createdEvents[0] ?? null,
+    elapsed,
+    fired: result.fired,
+    message: result.message,
+    debug: debugEnvelope,
+    manual,
+    operationalDiff: {
+      mode: rule.scope.mode,
+      ruleId: rule.id,
+      ruleName: rule.name,
+      site: rule.scope.site,
+      gateway: (rule.scope.serials ?? [])[0],
+      addedFailures,
+      removedFailures,
+      stillFailing,
+      nowOk,
+    },
+  };
 }
 
 export async function runAllRules() {
   const rules = await listRules();
   const started = Date.now();
   let fired = 0;
+  let resolved = 0;
+  let groupedNewActive = 0;
+  let groupedIncreasedBy = 0;
+  let groupedDecreasedBy = 0;
+  let groupedRecovered = 0;
+  let groupedUnchanged = 0;
+  const groupedOperational: Array<{
+    ruleId: string;
+    ruleName: string;
+    site?: string;
+    gateway?: string;
+    addedFailures: EntityTrace[];
+    removedFailures: EntityTrace[];
+    stillFailing: EntityTrace[];
+    nowOk: EntityTrace[];
+  }> = [];
   const updated: AlertRule[] = [];
 
   for (const rule of rules) {
@@ -513,6 +673,28 @@ export async function runAllRules() {
     const out = await evaluateRule(rule);
     updated.push(out.updatedRule);
     fired += out.createdEvents.length;
+    resolved += out.createdEvents.filter((event) => event.status === "resolved").length;
+
+    if (rule.scope.mode === "grouped") {
+      groupedOperational.push(out.operationalDiff);
+      const prevActive = !(rule.lastResult?.ok ?? true);
+      const currActive = !(out.updatedRule.lastResult?.ok ?? true);
+      const prevKeys = Array.isArray((rule.params as Record<string, unknown> | undefined)?.__activeEntityKeys)
+        ? ((rule.params as Record<string, unknown>).__activeEntityKeys as string[])
+        : [];
+      const currKeys = Array.isArray((out.updatedRule.params as Record<string, unknown> | undefined)?.__activeEntityKeys)
+        ? ((out.updatedRule.params as Record<string, unknown>).__activeEntityKeys as string[])
+        : [];
+      const delta = currKeys.length - prevKeys.length;
+
+      if (!prevActive && currActive) groupedNewActive += 1;
+      else if (prevActive && !currActive) groupedRecovered += 1;
+      else if (prevActive && currActive) {
+        if (delta > 0) groupedIncreasedBy += delta;
+        else if (delta < 0) groupedDecreasedBy += Math.abs(delta);
+        else groupedUnchanged += 1;
+      }
+    }
   }
 
   await saveRules(updated);
@@ -528,5 +710,15 @@ export async function runAllRules() {
     lastError: undefined,
   });
 
-  return { ok: true, evaluated: updated.length, fired };
+  const groupedChanges = {
+    newActive: groupedNewActive,
+    added: groupedIncreasedBy,
+    increasedBy: groupedIncreasedBy,
+    removed: groupedDecreasedBy,
+    decreasedBy: groupedDecreasedBy,
+    recovered: groupedRecovered,
+    unchanged: groupedUnchanged,
+  };
+
+  return { ok: true, evaluated: updated.length, fired, resolved, groupedChanges, groupedOperational };
 }
