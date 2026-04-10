@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 import json
+import calendar
 
 COMFORT_RANGES = {
     "TEMP": (18.0, 26.0), "HUM": (40.0, 70.0),
@@ -52,10 +53,21 @@ class Analyzer:
         if "PRES" in c:                          return "PRES"
         return ""
 
-    @staticmethod
-    def _daily_chart(series):
-        return {t.strftime("%Y-%m-%d"): round(float(v),1)
-                for t,v in series.items() if v > 0}
+    def _daily_chart(series, date_from=None, date_to=None):
+        import pytz
+        tz = pytz.timezone("Europe/Madrid")
+        result = {}
+        for t, v in series.items():
+            if v > 0:
+                if hasattr(t, "tzinfo") and t.tzinfo is not None:
+                    t_local = t.astimezone(tz)
+                else:
+                    t_local = pytz.utc.localize(t).astimezone(tz)
+                date_str = t_local.strftime("%Y-%m-%d")
+                if date_from and date_str < date_from: continue
+                if date_to   and date_str > date_to:   continue
+                result[date_str] = round(float(v), 1)
+        return result
 
     @staticmethod
     def _hourly_profile(df_r, col, accumulator=True):
@@ -112,13 +124,13 @@ class Analyzer:
                                 dp = Analyzer._prep_df(df_raw_prev)
                                 if c in dp.columns:
                                     pd_ = dp[c].resample("D").max()-dp[c].resample("D").min()
-                                    prev_chart = Analyzer._daily_chart(pd_)
+                                    prev_chart = Analyzer._daily_chart(pd_, date_from=str(pd_.index.min().date()), date_to=f"{pd_.index.min().year}-{pd_.index.min().month:02d}-{calendar.monthrange(pd_.index.min().year, pd_.index.min().month)[1]:02d}")
                             except: pass
                         kpis.append({
                             "title":f"{alias} ({c})","title_chart":f"Consumo ({total:.0f} {unit})",
                             "main_value":f"{int(total)} {unit}","secondary_value":"",
                             "label_main":"Acumulado","label_sec":"—",
-                            "chart_data":Analyzer._daily_chart(daily),"chart_type":"bar",
+                            "chart_data":Analyzer._daily_chart(daily, date_from=str(daily.index.min().date()), date_to=f"{daily.index.min().year}-{daily.index.min().month:02d}-{calendar.monthrange(daily.index.min().year, daily.index.min().month)[1]:02d}"),"chart_type":"bar",
                             "chart_color":"#E53935" if unit=="kWh" else "#F57F17",
                             "chart_unit":unit,
                             "chart_profile":Analyzer._hourly_profile(df_r,c,accumulator=True),
@@ -146,13 +158,13 @@ class Analyzer:
                     try:
                         dp = Analyzer._prep_df(df_daily_prev)
                         if target in dp.columns:
-                            prev_chart = Analyzer._daily_chart(dp[target].fillna(0))
+                            prev_chart = Analyzer._daily_chart(dp[target].fillna(0), date_from=str(dp.index.min().date()), date_to=f"{dp.index.min().year}-{dp.index.min().month:02d}-{calendar.monthrange(dp.index.min().year, dp.index.min().month)[1]:02d}")
                     except: pass
                 kpis.append({
                     "title":f"{alias} (Energía)","title_chart":f"Consumo ({total:.0f} kWh)",
                     "main_value":f"{int(total)} kWh","secondary_value":f"{cost:.2f} €",
                     "label_main":"Consumo","label_sec":"Coste estimado",
-                    "chart_data":Analyzer._daily_chart(daily),"chart_type":"bar",
+                    "chart_data":Analyzer._daily_chart(daily, date_from=str(daily.index.min().date()), date_to=f"{daily.index.min().year}-{daily.index.min().month:02d}-{calendar.monthrange(daily.index.min().year, daily.index.min().month)[1]:02d}"),"chart_type":"bar",
                     "chart_color":"#E53935","chart_unit":"kWh","chart_profile":prof,
                     "prev_chart_data":prev_chart,"type":"energy","suffix_name":"(Energía)",
                     "energy_column_selected":target,"total_energy_computed":float(total),

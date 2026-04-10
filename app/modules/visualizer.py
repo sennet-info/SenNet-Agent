@@ -90,9 +90,24 @@ class Visualizer:
             bars = ax.bar(x-(w/2 if has_prev else 0), y_vals, width=w,
                           color=main_c, alpha=0.92, label="Actual", zorder=3)
             if has_prev:
-                pv = sorted(prev_data.items())
-                pvals = [float(v) for _,v in pv[:len(x_labs)]]
-                while len(pvals)<len(x_labs): pvals.append(0)
+                from datetime import datetime as _dt, timedelta as _td
+                pv = dict(prev_data)
+                data_keys = sorted(data.keys())
+                prev_keys = sorted(pv.keys())
+                pvals = []
+                if data_keys and prev_keys:
+                    start_cur  = _dt.strptime(data_keys[0], "%Y-%m-%d")
+                    start_prev = _dt.strptime(prev_keys[0], "%Y-%m-%d")
+                    for k in data_keys:
+                        try:
+                            dt_cur = _dt.strptime(k, "%Y-%m-%d")
+                            dow_cur = dt_cur.weekday()
+                            week_cur = (dt_cur - start_cur).days // 7
+                            week_start_prev = start_prev + _td(days=week_cur * 7)
+                            target_prev = week_start_prev + _td(days=(dow_cur - week_start_prev.weekday()) % 7)
+                            pvals.append(float(pv.get(target_prev.strftime("%Y-%m-%d"), 0)))
+                        except:
+                            pvals.append(0)
                 ax.bar(x+w/2, pvals, width=w, color=light_c, alpha=0.85,
                        edgecolor=main_c, linewidth=0.5, label="Mes anterior", zorder=3)
                 ax.legend(fontsize=7, framealpha=0.95, loc="upper center", bbox_to_anchor=(0.5, 1.13), ncol=2, edgecolor="#DEE2E6")
