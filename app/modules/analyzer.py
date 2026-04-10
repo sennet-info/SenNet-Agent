@@ -95,7 +95,8 @@ class Analyzer:
 
     @staticmethod
     def analyze_device_dual(df_daily, df_raw, alias, price_kwh=0.15,
-                             df_daily_prev=None, df_raw_prev=None):
+                             df_daily_prev=None, df_raw_prev=None,
+                             date_from=None, date_to=None):
         kpis = []
 
         df_cons = Analyzer._prep_df(df_daily) if not df_daily.empty else pd.DataFrame()
@@ -130,7 +131,7 @@ class Analyzer:
                             "title":f"{alias} ({c})","title_chart":f"Consumo ({total:.0f} {unit})",
                             "main_value":f"{int(total)} {unit}","secondary_value":"",
                             "label_main":"Acumulado","label_sec":"—",
-                            "chart_data":Analyzer._daily_chart(daily, date_from=str(daily.index.min().date()), date_to=f"{daily.index.min().year}-{daily.index.min().month:02d}-{calendar.monthrange(daily.index.min().year, daily.index.min().month)[1]:02d}"),"chart_type":"bar",
+                            "chart_data":Analyzer._daily_chart(daily, date_from=date_from or str(daily.index.min().date()), date_to=date_to or f"{daily.index.min().year}-{daily.index.min().month:02d}-{calendar.monthrange(daily.index.min().year, daily.index.min().month)[1]:02d}"),"chart_type":"bar",
                             "chart_color":"#E53935" if unit=="kWh" else "#F57F17",
                             "chart_unit":unit,
                             "chart_profile":Analyzer._hourly_profile(df_r,c,accumulator=True),
@@ -164,7 +165,7 @@ class Analyzer:
                     "title":f"{alias} (Energía)","title_chart":f"Consumo ({total:.0f} kWh)",
                     "main_value":f"{int(total)} kWh","secondary_value":f"{cost:.2f} €",
                     "label_main":"Consumo","label_sec":"Coste estimado",
-                    "chart_data":Analyzer._daily_chart(daily, date_from=str(daily.index.min().date()), date_to=f"{daily.index.min().year}-{daily.index.min().month:02d}-{calendar.monthrange(daily.index.min().year, daily.index.min().month)[1]:02d}"),"chart_type":"bar",
+                    "chart_data":Analyzer._daily_chart(daily, date_from=date_from or str(daily.index.min().date()), date_to=date_to or f"{daily.index.min().year}-{daily.index.min().month:02d}-{calendar.monthrange(daily.index.min().year, daily.index.min().month)[1]:02d}"),"chart_type":"bar",
                     "chart_color":"#E53935","chart_unit":"kWh","chart_profile":prof,
                     "prev_chart_data":prev_chart,"type":"energy","suffix_name":"(Energía)",
                     "energy_column_selected":target,"total_energy_computed":float(total),

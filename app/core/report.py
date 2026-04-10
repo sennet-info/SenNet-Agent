@@ -291,8 +291,9 @@ def generate_report_pdf(
                 df_daily, df_raw, dev_name, price,
                 df_daily_prev=df_daily_prev if prev_has_data else None,
                 df_raw_prev=df_raw_prev     if prev_has_data else None,
+                date_from=str(start_dt.date()) if start_dt else None,
+                date_to=str(end_dt.date())     if end_dt else None,
             ) or []
-            analysis_elapsed = time.perf_counter() - t_a
 
             # Anotar aviso en cada KPI si no hubo datos anteriores
             if show_prev and not prev_has_data and prev_label:
